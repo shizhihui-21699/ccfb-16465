@@ -1,0 +1,14 @@
+[package]
+name = "droidunpack-emulator"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+droidunpack-core.workspace = true
+droidunpack-protocol.workspace = true
+droidunpack-evasion.workspace = true
+droidunpack-unpack.workspace = true
+serde.workspace = true
+adler.workspace = true
+sha1.workspace = true

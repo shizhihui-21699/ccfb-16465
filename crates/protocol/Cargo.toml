@@ -1,0 +1,10 @@
+[package]
+name = "droidunpack-protocol"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+droidunpack-core.workspace = true

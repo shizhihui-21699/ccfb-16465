@@ -1,0 +1,22 @@
+[package]
+name = "droidunpack"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "droidunpack"
+path = "src/main.rs"
+
+[dependencies]
+droidunpack-core.workspace = true
+droidunpack-protocol.workspace = true
+droidunpack-triage.workspace = true
+droidunpack-unpack.workspace = true
+droidunpack-cgraph.workspace = true
+droidunpack-emulator.workspace = true
+droidunpack-orchestrator.workspace = true
+droidunpack-report.workspace = true
+droidunpack-rules.workspace = true
+clap.workspace = true
+serde_json.workspace = true

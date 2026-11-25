@@ -1,0 +1,12 @@
+[package]
+name = "droidunpack-unpack"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+droidunpack-core.workspace = true
+droidunpack-protocol.workspace = true
+serde.workspace = true
+adler.workspace = true
+sha1.workspace = true

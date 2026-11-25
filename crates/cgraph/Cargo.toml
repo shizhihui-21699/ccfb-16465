@@ -1,0 +1,11 @@
+[package]
+name = "droidunpack-cgraph"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+droidunpack-core.workspace = true
+droidunpack-protocol.workspace = true
+droidunpack-rules.workspace = true
+serde.workspace = true

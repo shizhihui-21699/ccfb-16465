@@ -1,0 +1,10 @@
+[package]
+name = "droidunpack-triage"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+droidunpack-core.workspace = true
+serde.workspace = true
+zip.workspace = true

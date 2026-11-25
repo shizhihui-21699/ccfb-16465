@@ -1,0 +1,19 @@
+[package]
+name = "droidunpack-orchestrator"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+droidunpack-core.workspace = true
+droidunpack-protocol.workspace = true
+droidunpack-triage.workspace = true
+droidunpack-unpack.workspace = true
+droidunpack-rules.workspace = true
+droidunpack-cgraph.workspace = true
+droidunpack-evasion.workspace = true
+droidunpack-emulator.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+zip.workspace = true

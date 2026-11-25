@@ -1,0 +1,132 @@
+{
+  "name": "droidunpack-default",
+  "rules": [
+    {
+      "id": "ENV-PROBE-CLUSTER",
+      "title": "集中探测分析环境（模拟器/调试器/传感器）",
+      "severity": "high",
+      "description": "短时间内出现多种环境探测，是反分析逻辑的强信号；结合 spoofed 字段可判断样本是否因探测失败而隐藏行为。",
+      "attack": ["T1633.001"],
+      "sequence": [
+        { "kind": "env_probe", "as_name": "p1", "matches": [] },
+        { "kind": "env_probe", "as_name": "p2", "matches": [] },
+        { "kind": "env_probe", "as_name": "p3", "matches": [] }
+      ],
+      "window_ms": 20000,
+      "links": []
+    },
+    {
+      "id": "ROOT-EXEC-SU",
+      "title": "通过 su 执行特权命令",
+      "severity": "critical",
+      "description": "Runtime.exec/ProcessBuilder 调用 su，常见于 root 提权与持久化。",
+      "attack": ["T1404"],
+      "detect": {
+        "kind": "exec",
+        "matches": [
+          { "op": "contains", "field": "argv", "value": "su" }
+        ]
+      }
+    },
+    {
+      "id": "SMS-INTERCEPT",
+      "title": "拦截接收短信",
+      "severity": "high",
+      "description": "广播接收器处理 SMS_DELIVER，银行木马拦截验证码的典型入口。",
+      "attack": ["T1636.004"],
+      "detect": {
+        "kind": "sms",
+        "matches": [
+          { "op": "eq", "field": "direction", "value": "receive" }
+        ]
+      }
+    },
+    {
+      "id": "SMS-SEND-SILENT",
+      "title": "静默发送短信",
+      "severity": "critical",
+      "description": "调用 sendTextMessage 向外发送短信，资费消耗/验证码转发。",
+      "attack": ["T1636.004"],
+      "detect": {
+        "kind": "call",
+        "matches": [
+          { "op": "eq", "field": "name", "value": "sendTextMessage" }
+        ]
+      }
+    },
+    {
+      "id": "DYN-DEX-LOAD",
+      "title": "动态加载 DEX（加固/插件化）",
+      "severity": "suspicious",
+      "description": "DexClassLoader/InMemoryDexClassLoader 加载运行时释放的代码，脱壳流水线应已抓取对应 dex。",
+      "attack": ["T1407"],
+      "detect": {
+        "kind": "dex_load",
+        "matches": [
+          { "op": "exists", "field": "origin" }
+        ]
+      }
+    },
+    {
+      "id": "JNI-DYNAMIC-REGISTER",
+      "title": "JNI 动态注册 native 方法",
+      "severity": "suspicious",
+      "description": "RegisterNatives 动态绑定可隐藏 native 实现，需结合抓取的 ELF 做进一步逆向。",
+      "attack": ["T1407"],
+      "detect": {
+        "kind": "jni",
+        "matches": [
+          { "op": "eq", "field": "dynamic_register", "value": "true" }
+        ]
+      }
+    },
+    {
+      "id": "REFLECTION-EVADE",
+      "title": "反射调用隐藏行为",
+      "severity": "suspicious",
+      "description": "通过反射解析敏感 API 名称以绕过静态扫描。",
+      "detect": {
+        "kind": "reflection",
+        "matches": [
+          { "op": "exists", "field": "target" }
+        ]
+      }
+    },
+    {
+      "id": "EXFIL-SMS-CRYPTO-NET",
+      "title": "短信内容经加密后网络外泄",
+      "severity": "critical",
+      "description": "读短信→加密→联网的完整外泄链；link 保证网络载荷与短信内容同源。",
+      "attack": ["T1636.004", "T1573"],
+      "sequence": [
+        { "kind": "sms", "as_name": "sms", "matches": [] },
+        { "kind": "crypto", "as_name": "enc", "matches": [] },
+        { "kind": "network", "as_name": "net", "matches": [] }
+      ],
+      "window_ms": 60000,
+      "links": [
+        {
+          "from_step": "sms",
+          "from_field": "body",
+          "to_step": "net",
+          "to_field": "url"
+        }
+      ]
+    },
+    {
+      "id": "PRIVACY-LOCATION-EXFIL",
+      "title": "定位数据外泄",
+      "severity": "high",
+      "description": "读取位置后发起网络连接，按时间窗关联。",
+      "attack": ["T1430"],
+      "sequence": [
+        { "kind": "privacy_read", "as_name": "loc", "matches": [
+          { "op": "contains", "field": "source", "value": "location" }
+        ]},
+        { "kind": "network", "as_name": "net", "matches": [] }
+      ],
+      "window_ms": 30000,
+      "links": []
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "internal/droidunpack"
+
+[workspace.dependencies]
+# 内部 crate
+droidunpack-core = { path = "crates/core" }
+droidunpack-protocol = { path = "crates/protocol" }
+droidunpack-triage = { path = "crates/triage" }
+droidunpack-unpack = { path = "crates/unpack" }
+droidunpack-rules = { path = "crates/rules" }
+droidunpack-cgraph = { path = "crates/cgraph" }
+droidunpack-evasion = { path = "crates/evasion" }
+droidunpack-emulator = { path = "crates/emulator" }
+droidunpack-orchestrator = { path = "crates/orchestrator" }
+droidunpack-report = { path = "crates/report" }
+
+# 第三方
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+zip = "2"
+adler = "1"
+sha1 = "0.10"
+clap = { version = "4", features = ["derive"] }
+regex = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
