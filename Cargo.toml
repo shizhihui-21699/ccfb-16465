@@ -1,0 +1,38 @@
+[package]
+name = "unshroud"
+version = "0.1.0"
+edition = "2021"
+description = "Android malware unpacking and hidden-behaviour recovery in a Rust emulation sandbox"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+clap = { version = "4.6", features = ["derive"] }
+aes = "0.8"
+cipher = "0.4"
+flate2 = "1"
+hex = "0.4"
+md-5 = "0.10"
+rayon = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha1 = "0.10"
+sha2 = "0.10"
+thiserror = "2"
+zip = { version = "2.6.1", default-features = false, features = ["deflate"] }
+
+[[bin]]
+name = "unshroud"
+path = "src/cli.rs"
+
+[[bin]]
+name = "build_fixture"
+path = "src/bin/build_fixture.rs"
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
+panic = "abort"
+
+[dev-dependencies]
+tempfile = "3"
