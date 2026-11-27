@@ -7,7 +7,9 @@ pub struct ApkError {
 
 impl ApkError {
     pub fn new(context: impl Into<String>) -> Self {
-        Self { context: context.into() }
+        Self {
+            context: context.into(),
+        }
     }
 }
 

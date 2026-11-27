@@ -167,7 +167,10 @@ impl Budget {
         if self.apk_bytes_read > self.limits.max_apk_read_bytes {
             self.stop(
                 StopReason::Budget,
-                format!("APK read budget {} bytes exhausted", self.limits.max_apk_read_bytes),
+                format!(
+                    "APK read budget {} bytes exhausted",
+                    self.limits.max_apk_read_bytes
+                ),
             );
         }
     }
@@ -177,7 +180,10 @@ impl Budget {
         if self.dynamic_loads > self.limits.max_dynamic_loads {
             self.stop(
                 StopReason::Budget,
-                format!("dynamic load budget {} exhausted", self.limits.max_dynamic_loads),
+                format!(
+                    "dynamic load budget {} exhausted",
+                    self.limits.max_dynamic_loads
+                ),
             );
             return false;
         }

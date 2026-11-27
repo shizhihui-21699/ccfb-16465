@@ -166,7 +166,10 @@ pub fn scan_apis(dex: &DexFile) -> Vec<(String, &'static str)> {
     // method reference is hidden behind reflection.
     for (needle, why) in [
         ("dalvik/system/DexClassLoader", "DexClassLoader string"),
-        ("dalvik/system/InMemoryDexClassLoader", "InMemoryDexClassLoader string"),
+        (
+            "dalvik/system/InMemoryDexClassLoader",
+            "InMemoryDexClassLoader string",
+        ),
         ("dalvik/system/PathClassLoader", "PathClassLoader string"),
     ] {
         let needle: &str = needle;

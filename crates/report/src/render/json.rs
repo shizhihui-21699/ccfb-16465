@@ -92,12 +92,10 @@ struct JsonFacts {
 
 pub fn to_json(r: &Report) -> String {
     let score = crate::findings::overall_score(&r.findings);
-    let verdict = r
-        .findings
-        .iter()
-        .any(|f| f.title.contains("executed"))
-        .then(|| "malicious".to_string())
-        .unwrap_or_else(|| {
+    let verdict = if r.findings.iter().any(|f| f.title.contains("executed")) {
+        "malicious".to_string()
+    } else {
+        {
             match r.findings.first().map(|f| f.severity) {
                 Some(crate::Severity::Critical) => "malicious".into(),
                 Some(crate::Severity::High) => "suspicious-high".into(),
@@ -105,7 +103,8 @@ pub fn to_json(r: &Report) -> String {
                 Some(crate::Severity::Low) => "low".into(),
                 _ => "clean".into(),
             }
-        });
+        }
+    };
     let doc = JsonReport {
         schema: "unhusk/report/v1",
         package: &r.facts.package,

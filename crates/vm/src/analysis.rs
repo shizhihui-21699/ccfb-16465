@@ -4,10 +4,10 @@
 use crate::env::{naive_emulator_profile, pixel_profile, DeviceProfile, Env};
 use crate::events::Trace;
 use crate::interp::engine::Machine;
-use crate::limits::StopReason;
 use crate::interp::program::{Program, RecoveredDex};
 use crate::interp::state::Policy;
 use crate::limits::Limits;
+use crate::limits::StopReason;
 use crate::value::Value;
 use serde::{Deserialize, Serialize};
 
@@ -85,8 +85,6 @@ impl Analysis {
     pub fn methods_entered(&self) -> usize {
         self.machine.methods_entered
     }
-
-
 }
 
 /// Build the program for an APK: all shipped DEX, in load order.
@@ -111,7 +109,8 @@ pub fn analyze(apk: &Apk, cfg: &AnalysisConfig) -> Analysis {
     for name in apk.names() {
         if name.starts_with("assets/") {
             if let Ok(Some(data)) = apk.read(name) {
-                env.assets.insert(name.trim_start_matches("assets/").to_string(), data);
+                env.assets
+                    .insert(name.trim_start_matches("assets/").to_string(), data);
             }
         }
     }
@@ -245,14 +244,11 @@ impl Machine {
         // 2. An instance, so non-static lifecycle methods have a receiver. The
         //    constructor itself often does real work (registering receivers,
         //    starting services), so it is worth running.
-        let instance = match self.heap.alloc(crate::heap::Object::Instance {
+        let instance = self.heap.alloc(crate::heap::Object::Instance {
             class: class_desc.to_string(),
             fields: Default::default(),
             prov: crate::value::Provenance::default(),
-        }) {
-            Some(id) => Some(id),
-            None => None,
-        };
+        });
         if let Some(id) = instance {
             if let Some(ctor) = self
                 .program
@@ -265,7 +261,7 @@ impl Machine {
                     let display = self.program.method(ctor).display();
                     let mut args = vec![Value::obj(id)];
                     let need = self.program.method(ctor).proto.params.len();
-                    args.extend(std::iter::repeat(Value::NULL).take(need));
+                    args.extend(std::iter::repeat_n(Value::NULL, need));
                     self.executed.push(display);
                     let _ = self.push_frame(ctor, args, None, None);
                     let _ = self.run();
@@ -292,7 +288,12 @@ impl Machine {
                 for h in handles {
                     let (has_code, is_static, nargs, display) = {
                         let m = self.program.method(h);
-                        (m.code.is_some(), m.is_static, m.proto.params.len(), m.display())
+                        (
+                            m.code.is_some(),
+                            m.is_static,
+                            m.proto.params.len(),
+                            m.display(),
+                        )
                     };
                     if !has_code || is_static || self.entered.contains(&h) {
                         continue;
@@ -301,7 +302,7 @@ impl Machine {
                         return;
                     }
                     let mut args = vec![Value::obj(id)];
-                    args.extend(std::iter::repeat(Value::NULL).take(nargs));
+                    args.extend(std::iter::repeat_n(Value::NULL, nargs));
                     self.executed.push(display);
                     let _ = self.push_frame(h, args, None, None);
                     let _ = self.run();
@@ -322,7 +323,12 @@ impl Machine {
         for h in handles {
             let (has_code, is_static, nargs, display) = {
                 let m = self.program.method(h);
-                (m.code.is_some(), m.is_static, m.proto.params.len(), m.display())
+                (
+                    m.code.is_some(),
+                    m.is_static,
+                    m.proto.params.len(),
+                    m.display(),
+                )
             };
             if !has_code || !is_static || self.entered.contains(&h) {
                 continue;

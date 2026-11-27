@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use unhusk_dex::{Class, DexFile, Method, ClassData};
+use unhusk_dex::{Class, ClassData, DexFile, Method};
 
 /// Identifies one method body inside the program.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -105,12 +105,16 @@ impl Program {
                 ids.push(self.field_id(&sig));
             }
         }
-        self.class_fields.insert(descriptor.to_string(), ids.clone());
+        self.class_fields
+            .insert(descriptor.to_string(), ids.clone());
         ids
     }
 
     pub fn field_name(&self, id: u32) -> &str {
-        self.field_names.get(id as usize).map(|s| s.as_str()).unwrap_or("?")
+        self.field_names
+            .get(id as usize)
+            .map(|s| s.as_str())
+            .unwrap_or("?")
     }
 
     /// Add a DEX. Returns its index. `recovery` is `None` for DEX shipped in
@@ -139,7 +143,12 @@ impl Program {
                     class: ci as u32,
                     slot: slot as u32,
                 };
-                let sig = method_sig(&class.descriptor, &m.name, &m.proto.params, &m.proto.return_type);
+                let sig = method_sig(
+                    &class.descriptor,
+                    &m.name,
+                    &m.proto.params,
+                    &m.proto.return_type,
+                );
                 self.method_map.entry(sig.clone()).or_insert(handle);
                 self.by_name
                     .entry((class.descriptor.clone(), m.name.clone()))
@@ -183,7 +192,9 @@ impl Program {
     pub fn find_class(&self, descriptor: &str) -> Option<(u32, u32)> {
         // Later DEXes win: a recovered payload that redefines a stub class is
         // the one the classloader would bind.
-        self.class_map.get(descriptor).and_then(|v| v.last().copied())
+        self.class_map
+            .get(descriptor)
+            .and_then(|v| v.last().copied())
     }
 
     pub fn class_exists(&self, descriptor: &str) -> bool {
@@ -191,7 +202,13 @@ impl Program {
     }
 
     /// Resolve a method by its declared signature, looking only at one class.
-    pub fn find_method_in_class(&self, descriptor: &str, name: &str, params: &[String], ret: &str) -> Option<MethodHandle> {
+    pub fn find_method_in_class(
+        &self,
+        descriptor: &str,
+        name: &str,
+        params: &[String],
+        ret: &str,
+    ) -> Option<MethodHandle> {
         let sig = method_sig(descriptor, name, params, ret);
         self.method_map.get(&sig).copied()
     }
@@ -201,7 +218,10 @@ impl Program {
     }
 
     pub fn signature(&self, h: MethodHandle) -> &str {
-        self.signature_cache.get(&h).map(|s| s.as_str()).unwrap_or("?")
+        self.signature_cache
+            .get(&h)
+            .map(|s| s.as_str())
+            .unwrap_or("?")
     }
 
     /// Methods with this bare name in this class, ignoring the signature.
@@ -247,7 +267,9 @@ impl Program {
         }
         let mut cur = class.to_string();
         for _ in 0..64 {
-            let Some((dex, ci)) = self.find_class(&cur) else { return false };
+            let Some((dex, ci)) = self.find_class(&cur) else {
+                return false;
+            };
             match self.class_at(dex, ci).superclass.clone() {
                 Some(s) => {
                     if s == base {

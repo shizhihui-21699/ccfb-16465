@@ -21,7 +21,10 @@ fn run_decrypt(blob: &[u8], buf: &[u8], key: &[u8]) -> Option<Vec<u8>> {
     m.regs[1] = buf.len() as u64;
     m.regs[2] = KEY;
     let out = m.run(m.mem_base + code.vaddr, &NativeLimits::default());
-    assert!(matches!(out, NativeOutcome::Returned { .. }), "native run: {out:?}");
+    assert!(
+        matches!(out, NativeOutcome::Returned { .. }),
+        "native run: {out:?}"
+    );
     m.read_mem(BUF, buf.len()).map(|b| b.to_vec())
 }
 

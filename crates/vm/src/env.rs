@@ -103,8 +103,7 @@ pub fn pixel_profile() -> DeviceProfile {
         product: "oriole".into(),
         board: "oriole".into(),
         hardware: "oriole".into(),
-        fingerprint:
-            "google/oriole/oriole:13/TQ3A.230805.001/10316531:user/release-keys".into(),
+        fingerprint: "google/oriole/oriole:13/TQ3A.230805.001/10316531:user/release-keys".into(),
         bootloader: "slider-1.0-9179901".into(),
         tags: "release-keys".into(),
         build_type: "user".into(),
@@ -119,11 +118,7 @@ pub fn pixel_profile() -> DeviceProfile {
         sdk_int: 33,
         release: "13".into(),
         abis: vec!["arm64-v8a".into(), "armeabi-v7a".into(), "armeabi".into()],
-        supported_abis: vec![
-            "arm64-v8a".into(),
-            "armeabi-v7a".into(),
-            "armeabi".into(),
-        ],
+        supported_abis: vec!["arm64-v8a".into(), "armeabi-v7a".into(), "armeabi".into()],
         cpu_abi: "arm64-v8a".into(),
         cpuinfo: "processor\t: 0\nBogoMIPS\t: 78.00\nFeatures\t: fp asimd evtstrm aes \
                   pmull sha1 sha2 crc32 atomics fphp asimdhp cpuid asimdrdm lrcpc dcpop \
@@ -182,16 +177,66 @@ pub fn pixel_profile() -> DeviceProfile {
             },
         ],
         installed_packages: vec![
-            InstalledPackage { name: "com.android.chrome".into(), label: "Chrome".into(), version: "117.0.5938.60".into(), system: false },
-            InstalledPackage { name: "com.google.android.gms".into(), label: "Google Play services".into(), version: "23.34.15".into(), system: true },
-            InstalledPackage { name: "com.android.vending".into(), label: "Google Play Store".into(), version: "37.0.19".into(), system: true },
-            InstalledPackage { name: "com.whatsapp".into(), label: "WhatsApp".into(), version: "2.23.18.79".into(), system: false },
-            InstalledPackage { name: "com.android.settings".into(), label: "Settings".into(), version: "13".into(), system: true },
-            InstalledPackage { name: "com.google.android.apps.maps".into(), label: "Maps".into(), version: "11.97.1".into(), system: false },
-            InstalledPackage { name: "com.android.systemui".into(), label: "System UI".into(), version: "13".into(), system: true },
-            InstalledPackage { name: "com.google.android.gm".into(), label: "Gmail".into(), version: "2023.08.20".into(), system: false },
-            InstalledPackage { name: "com.tencent.mm".into(), label: "WeChat".into(), version: "8.0.40".into(), system: false },
-            InstalledPackage { name: "com.facebook.katana".into(), label: "Facebook".into(), version: "425.0.0".into(), system: false },
+            InstalledPackage {
+                name: "com.android.chrome".into(),
+                label: "Chrome".into(),
+                version: "117.0.5938.60".into(),
+                system: false,
+            },
+            InstalledPackage {
+                name: "com.google.android.gms".into(),
+                label: "Google Play services".into(),
+                version: "23.34.15".into(),
+                system: true,
+            },
+            InstalledPackage {
+                name: "com.android.vending".into(),
+                label: "Google Play Store".into(),
+                version: "37.0.19".into(),
+                system: true,
+            },
+            InstalledPackage {
+                name: "com.whatsapp".into(),
+                label: "WhatsApp".into(),
+                version: "2.23.18.79".into(),
+                system: false,
+            },
+            InstalledPackage {
+                name: "com.android.settings".into(),
+                label: "Settings".into(),
+                version: "13".into(),
+                system: true,
+            },
+            InstalledPackage {
+                name: "com.google.android.apps.maps".into(),
+                label: "Maps".into(),
+                version: "11.97.1".into(),
+                system: false,
+            },
+            InstalledPackage {
+                name: "com.android.systemui".into(),
+                label: "System UI".into(),
+                version: "13".into(),
+                system: true,
+            },
+            InstalledPackage {
+                name: "com.google.android.gm".into(),
+                label: "Gmail".into(),
+                version: "2023.08.20".into(),
+                system: false,
+            },
+            InstalledPackage {
+                name: "com.tencent.mm".into(),
+                label: "WeChat".into(),
+                version: "8.0.40".into(),
+                system: false,
+            },
+            InstalledPackage {
+                name: "com.facebook.katana".into(),
+                label: "Facebook".into(),
+                version: "425.0.0".into(),
+                system: false,
+            },
         ],
         existing_paths: vec![
             "/system".into(),
@@ -388,7 +433,11 @@ impl VirtualFs {
 
     pub fn list(&self, dir: &str) -> Vec<String> {
         let d = normalize_path(dir);
-        let prefix = if d.ends_with('/') { d.clone() } else { format!("{d}/") };
+        let prefix = if d.ends_with('/') {
+            d.clone()
+        } else {
+            format!("{d}/")
+        };
         let mut out: Vec<String> = self
             .files
             .keys()
@@ -590,7 +639,10 @@ mod tests {
         let p = pixel_profile();
         let fs = VirtualFs::from_profile(&p);
         for path in EMULATOR_ARTIFACTS {
-            assert!(!fs.exists(path), "{path} must not exist in the hardened profile");
+            assert!(
+                !fs.exists(path),
+                "{path} must not exist in the hardened profile"
+            );
         }
     }
 }

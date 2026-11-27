@@ -69,14 +69,20 @@ impl Machine {
                 // Widths: a wide result needs its register pair, object results
                 // need to be delivered as references.
                 let wide = matches!(method_ref.proto.return_type.as_str(), "J" | "D");
-                let obj = method_ref.proto.return_type.starts_with('L') || method_ref.proto.return_type.starts_with('[');
+                let obj = method_ref.proto.return_type.starts_with('L')
+                    || method_ref.proto.return_type.starts_with('[');
                 // The `move-result` that follows writes to a register we find
                 // by scanning forward; Dalvik guarantees it is the next
                 // instruction, so we record the destination there.
                 let result_reg = self.next_move_result_reg();
                 let call_site = Some((frame_method, insn.pc));
                 self.budget.charge_dynamic_load();
-                match self.push_frame(handle, args.clone(), call_site, result_reg.map(|r| (r, wide, obj))) {
+                match self.push_frame(
+                    handle,
+                    args.clone(),
+                    call_site,
+                    result_reg.map(|r| (r, wide, obj)),
+                ) {
                     Ok(()) => Ok(()),
                     Err(StopReason::Unsupported) => {
                         // Declared method with no body (abstract/native).
@@ -118,7 +124,12 @@ impl Machine {
         // If we have bytecode for this exact method and the class is in the
         // program, run it.
         if self.program.class_exists(class) {
-            if let Some(h) = self.program.find_method_in_class(class, &mr.name, &mr.proto.params, &mr.proto.return_type) {
+            if let Some(h) = self.program.find_method_in_class(
+                class,
+                &mr.name,
+                &mr.proto.params,
+                &mr.proto.return_type,
+            ) {
                 if self.program.method(h).code.is_some() {
                     return Target::Code(h);
                 }
@@ -159,7 +170,7 @@ impl Machine {
         let frame = self.frames.last()?;
         let code = self.program.method(frame.method).code.as_ref()?;
         let next = code.instructions.get(frame.ip)?;
-        if matches!(next.op, 0x0a | 0x0b | 0x0c) {
+        if matches!(next.op, 0x0a..=0x0c) {
             Some(next.a)
         } else {
             None
@@ -177,7 +188,13 @@ impl Machine {
         }
     }
 
-    fn handle_native_or_abstract(&mut self, mr: &MethodRef, args: &[Value], wide: bool, obj: bool) -> Result<(), StopReason> {
+    fn handle_native_or_abstract(
+        &mut self,
+        mr: &MethodRef,
+        args: &[Value],
+        wide: bool,
+        obj: bool,
+    ) -> Result<(), StopReason> {
         // Native methods from the framework are modelled; native methods on
         // sample classes are a signal we surface rather than guess about.
         if self.program.class_exists(&mr.class) {
@@ -191,7 +208,16 @@ impl Machine {
                 Some("native method (not emulated)".into()),
             );
             if let Some(reg) = self.next_move_result_reg() {
-                self.set_reg(reg, if obj { Value::NULL } else if wide { Value::J(0) } else { Value::I(0) });
+                self.set_reg(
+                    reg,
+                    if obj {
+                        Value::NULL
+                    } else if wide {
+                        Value::J(0)
+                    } else {
+                        Value::I(0)
+                    },
+                );
             }
             return Ok(());
         }
@@ -201,7 +227,16 @@ impl Machine {
             self.record_call(mr, args, &ev);
         }
         if let Some(reg) = self.next_move_result_reg() {
-            self.set_reg(reg, value.unwrap_or(if obj { Value::NULL } else if wide { Value::J(0) } else { Value::I(0) }));
+            self.set_reg(
+                reg,
+                value.unwrap_or(if obj {
+                    Value::NULL
+                } else if wide {
+                    Value::J(0)
+                } else {
+                    Value::I(0)
+                }),
+            );
         }
         Ok(())
     }

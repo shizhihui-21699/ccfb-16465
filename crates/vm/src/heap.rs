@@ -153,7 +153,11 @@ pub const DEFAULT_HEAP_LIMIT: usize = 4_000_000;
 
 impl Heap {
     pub fn new(limit: usize) -> Self {
-        Self { objects: Vec::new(), limit, allocation_failures: 0 }
+        Self {
+            objects: Vec::new(),
+            limit,
+            allocation_failures: 0,
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -185,19 +189,37 @@ impl Heap {
         if id == 0 {
             return None;
         }
-        self.objects.get_mut(id as usize - 1).and_then(|o| o.as_mut())
+        self.objects
+            .get_mut(id as usize - 1)
+            .and_then(|o| o.as_mut())
     }
 
     pub fn new_string(&mut self, s: impl Into<String>, prov: Provenance) -> Option<ObjId> {
-        self.alloc(Object::Str { value: s.into(), prov })
+        self.alloc(Object::Str {
+            value: s.into(),
+            prov,
+        })
     }
 
     pub fn new_bytes(&mut self, bytes: Vec<u8>, prov: Provenance) -> Option<ObjId> {
-        self.alloc(Object::Array { elem: "[B".into(), bytes, prov })
+        self.alloc(Object::Array {
+            elem: "[B".into(),
+            bytes,
+            prov,
+        })
     }
 
-    pub fn new_array(&mut self, elem: impl Into<String>, bytes: Vec<u8>, prov: Provenance) -> Option<ObjId> {
-        self.alloc(Object::Array { elem: elem.into(), bytes, prov })
+    pub fn new_array(
+        &mut self,
+        elem: impl Into<String>,
+        bytes: Vec<u8>,
+        prov: Provenance,
+    ) -> Option<ObjId> {
+        self.alloc(Object::Array {
+            elem: elem.into(),
+            bytes,
+            prov,
+        })
     }
 
     pub fn new_model(&mut self, class: impl Into<String>, prov: Provenance) -> Option<ObjId> {
@@ -208,12 +230,24 @@ impl Heap {
         })
     }
 
-    pub fn new_obj_array(&mut self, elem: impl Into<String>, items: Vec<crate::value::Value>, prov: Provenance) -> Option<ObjId> {
-        self.alloc(Object::ObjArray { elem: elem.into(), items, prov })
+    pub fn new_obj_array(
+        &mut self,
+        elem: impl Into<String>,
+        items: Vec<crate::value::Value>,
+        prov: Provenance,
+    ) -> Option<ObjId> {
+        self.alloc(Object::ObjArray {
+            elem: elem.into(),
+            items,
+            prov,
+        })
     }
 
     pub fn new_builder(&mut self, prov: Provenance) -> Option<ObjId> {
-        self.alloc(Object::Builder { buf: String::new(), prov })
+        self.alloc(Object::Builder {
+            buf: String::new(),
+            prov,
+        })
     }
 
     /// Live object count (for diagnostics).

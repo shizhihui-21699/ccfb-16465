@@ -42,7 +42,10 @@ impl MethodRef {
     /// `Lpkg/Cls;->name(Lp1;I)Ret`
     pub fn signature(&self) -> String {
         let params: String = self.proto.params.iter().map(|p| p.as_str()).collect();
-        format!("{}->{}({}){}", self.class, self.name, params, self.proto.return_type)
+        format!(
+            "{}->{}({}){}",
+            self.class, self.name, params, self.proto.return_type
+        )
     }
 
     /// Short form used in reports: `pkg.Cls.name(Lp1;I)Ret`
@@ -156,12 +159,21 @@ pub struct Method {
 impl Method {
     pub fn signature(&self) -> String {
         let params: String = self.proto.params.iter().map(|p| p.as_str()).collect();
-        format!("{}->{}({}){}", self.class, self.name, params, self.proto.return_type)
+        format!(
+            "{}->{}({}){}",
+            self.class, self.name, params, self.proto.return_type
+        )
     }
 
     pub fn display(&self) -> String {
         let params: String = self.proto.params.iter().map(|p| p.as_str()).collect();
-        format!("{}.{}({}){}", dotted(&self.class), self.name, params, self.proto.return_type)
+        format!(
+            "{}.{}({}){}",
+            dotted(&self.class),
+            self.name,
+            params,
+            self.proto.return_type
+        )
     }
 }
 
@@ -191,7 +203,10 @@ pub enum EncodedValue {
     Method(MethodRef),
     Enum(FieldRef),
     Array(Vec<EncodedValue>),
-    Annotation { ty: Type, elements: Vec<(String, EncodedValue)> },
+    Annotation {
+        ty: Type,
+        elements: Vec<(String, EncodedValue)>,
+    },
     Null,
     Boolean(bool),
     MethodHandle(u32),
@@ -276,7 +291,10 @@ impl Class {
     }
 
     pub fn methods(&self) -> impl Iterator<Item = &Method> {
-        self.data.direct_methods.iter().chain(self.data.virtual_methods.iter())
+        self.data
+            .direct_methods
+            .iter()
+            .chain(self.data.virtual_methods.iter())
     }
 }
 
@@ -308,11 +326,7 @@ impl DexFile {
                     m.name == name
                         && (params.is_empty()
                             || m.proto.params.len() == params.len()
-                                && m.proto
-                                    .params
-                                    .iter()
-                                    .zip(params)
-                                    .all(|(a, b)| a == b))
+                                && m.proto.params.iter().zip(params).all(|(a, b)| a == b))
                 })
             })
     }
@@ -353,7 +367,6 @@ impl DexFile {
 // ---------------------------------------------------------------------------
 
 struct Parser<'a> {
-    r: Reader<'a>,
     raw: &'a [u8],
     strings: Vec<String>,
     types: Vec<Type>,
@@ -480,7 +493,11 @@ pub fn parse(data: &[u8]) -> Result<DexFile> {
             .cloned()
             .ok_or_else(|| DexError::out_of_range("proto return type index"))?;
         let params = parse_type_list(data, params_off, &types)?;
-        protos.push(ProtoRef { shorty, return_type: ret, params });
+        protos.push(ProtoRef {
+            shorty,
+            return_type: ret,
+            params,
+        });
     }
 
     let mut fields = Vec::with_capacity(field_ids_size.min(1 << 20) as usize);
@@ -489,15 +506,18 @@ pub fn parse(data: &[u8]) -> Result<DexFile> {
         let class_idx = r.u16()?;
         let type_idx = r.u16()?;
         let name_idx = r.u32()?;
-        let class = types.get(class_idx as usize).cloned().ok_or_else(|| {
-            DexError::out_of_range(format!("field {i} class type {class_idx}"))
-        })?;
-        let ty = types.get(type_idx as usize).cloned().ok_or_else(|| {
-            DexError::out_of_range(format!("field {i} type {type_idx}"))
-        })?;
-        let name = strings.get(name_idx as usize).cloned().ok_or_else(|| {
-            DexError::out_of_range(format!("field {i} name string {name_idx}"))
-        })?;
+        let class = types
+            .get(class_idx as usize)
+            .cloned()
+            .ok_or_else(|| DexError::out_of_range(format!("field {i} class type {class_idx}")))?;
+        let ty = types
+            .get(type_idx as usize)
+            .cloned()
+            .ok_or_else(|| DexError::out_of_range(format!("field {i} type {type_idx}")))?;
+        let name = strings
+            .get(name_idx as usize)
+            .cloned()
+            .ok_or_else(|| DexError::out_of_range(format!("field {i} name string {name_idx}")))?;
         fields.push(FieldRef { class, name, ty });
     }
 
@@ -507,20 +527,22 @@ pub fn parse(data: &[u8]) -> Result<DexFile> {
         let class_idx = r.u16()?;
         let proto_idx = r.u16()?;
         let name_idx = r.u32()?;
-        let class = types.get(class_idx as usize).cloned().ok_or_else(|| {
-            DexError::out_of_range(format!("method {i} class type {class_idx}"))
-        })?;
-        let proto = protos.get(proto_idx as usize).cloned().ok_or_else(|| {
-            DexError::out_of_range(format!("method {i} proto {proto_idx}"))
-        })?;
-        let name = strings.get(name_idx as usize).cloned().ok_or_else(|| {
-            DexError::out_of_range(format!("method {i} name string {name_idx}"))
-        })?;
+        let class = types
+            .get(class_idx as usize)
+            .cloned()
+            .ok_or_else(|| DexError::out_of_range(format!("method {i} class type {class_idx}")))?;
+        let proto = protos
+            .get(proto_idx as usize)
+            .cloned()
+            .ok_or_else(|| DexError::out_of_range(format!("method {i} proto {proto_idx}")))?;
+        let name = strings
+            .get(name_idx as usize)
+            .cloned()
+            .ok_or_else(|| DexError::out_of_range(format!("method {i} name string {name_idx}")))?;
         methods.push(MethodRef { class, name, proto });
     }
 
     let mut p = Parser {
-        r: Reader::new(data),
         raw: data,
         strings,
         types,
@@ -541,11 +563,10 @@ pub fn parse(data: &[u8]) -> Result<DexFile> {
         let class_data_off = r.u32()?;
         let static_values_off = r.u32()?;
 
-        let descriptor = p
-            .types
-            .get(class_idx as usize)
-            .cloned()
-            .ok_or_else(|| DexError::out_of_range(format!("class_def {i} -> type {class_idx}")))?;
+        let descriptor =
+            p.types.get(class_idx as usize).cloned().ok_or_else(|| {
+                DexError::out_of_range(format!("class_def {i} -> type {class_idx}"))
+            })?;
         let superclass = if superclass_idx == NO_INDEX {
             None
         } else {
@@ -681,7 +702,8 @@ impl<'a> Parser<'a> {
                 .checked_add(r.uleb128()?)
                 .ok_or_else(|| DexError::out_of_range("instance field idx diff overflow"))?;
             let flags = r.uleb128()?;
-            data.instance_fields.push(self.make_field(idx, flags, false)?);
+            data.instance_fields
+                .push(self.make_field(idx, flags, false)?);
         }
         idx = 0;
         for _ in 0..direct_methods_size {
@@ -690,7 +712,8 @@ impl<'a> Parser<'a> {
                 .ok_or_else(|| DexError::out_of_range("direct method idx diff overflow"))?;
             let flags = r.uleb128()?;
             let code_off = r.uleb128()?;
-            data.direct_methods.push(self.make_method(idx, flags, code_off)?);
+            data.direct_methods
+                .push(self.make_method(idx, flags, code_off)?);
         }
         idx = 0;
         for _ in 0..virtual_methods_size {
@@ -699,7 +722,8 @@ impl<'a> Parser<'a> {
                 .ok_or_else(|| DexError::out_of_range("virtual method idx diff overflow"))?;
             let flags = r.uleb128()?;
             let code_off = r.uleb128()?;
-            data.virtual_methods.push(self.make_method(idx, flags, code_off)?);
+            data.virtual_methods
+                .push(self.make_method(idx, flags, code_off)?);
         }
         Ok(data)
     }
@@ -811,7 +835,11 @@ impl<'a> Parser<'a> {
                         handlers.push((None, catch_all));
                     }
                 }
-                tries.push(TryBlock { start_pc, insn_count: insn_count as u32, handlers });
+                tries.push(TryBlock {
+                    start_pc,
+                    insn_count: insn_count as u32,
+                    handlers,
+                });
             }
         }
 
@@ -838,7 +866,10 @@ impl<'a> Parser<'a> {
         let mut r = Reader::at(self.raw, off as usize)?;
         let size = r.uleb128()?;
         if size > 100_000 {
-            return Err(DexError::new(ErrorKind::OutOfRange, "encoded array too large"));
+            return Err(DexError::new(
+                ErrorKind::OutOfRange,
+                "encoded array too large",
+            ));
         }
         let mut out = Vec::with_capacity(size as usize);
         for _ in 0..size {
@@ -852,7 +883,10 @@ impl<'a> Parser<'a> {
         let value_type = b & 0x1f;
         let value_arg = b >> 5;
         if value_arg > 7 && value_type != 0x1c && value_type != 0x1d {
-            return Err(DexError::new(ErrorKind::OutOfRange, "encoded_value arg > 7"));
+            return Err(DexError::new(
+                ErrorKind::OutOfRange,
+                "encoded_value arg > 7",
+            ));
         }
         let n = value_arg as usize + 1;
         match value_type {
@@ -862,7 +896,7 @@ impl<'a> Parser<'a> {
             0x04 => Ok(EncodedValue::Int(read_signed(r, n)? as i32)),
             0x06 => Ok(EncodedValue::Long(read_signed(r, n)?)),
             0x10 => Ok(EncodedValue::Float(f32::from_bits(
-                read_unsigned(r, n)? as u32,
+                read_unsigned(r, n)? as u32
             ))),
             0x11 => Ok(EncodedValue::Double(f64::from_bits(
                 read_unsigned(r, n)?.rotate_left(0) as u64,
@@ -918,7 +952,10 @@ impl<'a> Parser<'a> {
                 // array: value_arg is unused (must be 0), size follows as uleb128
                 let size = r.uleb128()?;
                 if size > 100_000 {
-                    return Err(DexError::new(ErrorKind::OutOfRange, "encoded array too large"));
+                    return Err(DexError::new(
+                        ErrorKind::OutOfRange,
+                        "encoded array too large",
+                    ));
                 }
                 let mut items = Vec::with_capacity(size as usize);
                 for _ in 0..size {
@@ -949,7 +986,10 @@ impl<'a> Parser<'a> {
             0x1e => Ok(EncodedValue::Null),
             0x1f => {
                 if value_arg > 1 {
-                    return Err(DexError::new(ErrorKind::OutOfRange, "bad boolean value_arg"));
+                    return Err(DexError::new(
+                        ErrorKind::OutOfRange,
+                        "bad boolean value_arg",
+                    ));
                 }
                 Ok(EncodedValue::Boolean(value_arg == 1))
             }
@@ -1019,9 +1059,7 @@ fn parse_debug_lines(data: &[u8], off: u32) -> Result<Vec<(u32, u32)>> {
             special => {
                 let adjusted = (special - 0x0a) as u32;
                 addr = addr.wrapping_add(adjusted / 15);
-                line = line
-                    .wrapping_add((adjusted % 15) as i64 - 4)
-                    .max(0);
+                line = line.wrapping_add((adjusted % 15) as i64 - 4).max(0);
                 if line >= 0 {
                     let l = line as u32;
                     if table.last().map(|&(_, prev)| prev) != Some(l) {

@@ -47,5 +47,3 @@ impl Outcome {
             .collect()
     }
 }
-
-

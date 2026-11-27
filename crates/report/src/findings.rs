@@ -6,7 +6,7 @@
 //! trace by rules that are explicit and reviewable; the rules never claim more
 //! than the corresponding events show.
 
-use crate::{ReportInput, Report};
+use crate::ReportInput;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use unhusk_vm::events::{Event, EventKind, Layer};
@@ -136,7 +136,8 @@ pub fn extract(input: &ReportInput<'_>, graph: &crate::CallGraph) -> Vec<Finding
     // Keep the first occurrence of each distinct (caller, detail) pair.
     for f in &mut findings {
         let mut seen = std::collections::BTreeSet::new();
-        f.evidence.retain(|e| seen.insert((e.caller.clone(), e.detail.clone())));
+        f.evidence
+            .retain(|e| seen.insert((e.caller.clone(), e.detail.clone())));
     }
     // Rank: severity first, then evidence count, then earliest event.
     findings.sort_by(|a, b| {
@@ -177,7 +178,9 @@ fn call_path(graph: &crate::CallGraph, method: &str) -> Vec<String> {
         let mut callers = graph.callers(&cur);
         // Prefer a caller that is not an entry we synthesised.
         callers.sort();
-        let Some(parent) = callers.into_iter().next() else { break };
+        let Some(parent) = callers.into_iter().next() else {
+            break;
+        };
         if !seen.insert(parent.to_string()) {
             break;
         }
@@ -199,7 +202,10 @@ fn runtime_payload(input: &ReportInput<'_>, graph: &crate::CallGraph, out: &mut 
     }
     let mut indicators = Vec::new();
     for r in input.recovered {
-        indicators.push(format!("{} (sha1 {}, {} classes, {} bytes)", r.name, r.sha1, r.classes, r.size));
+        indicators.push(format!(
+            "{} (sha1 {}, {} classes, {} bytes)",
+            r.name, r.sha1, r.classes, r.size
+        ));
     }
     // Only classes that were actually executed count as "recovered and run".
     let runtime_methods: Vec<String> = input
@@ -221,7 +227,10 @@ fn runtime_payload(input: &ReportInput<'_>, graph: &crate::CallGraph, out: &mut 
     let title = if input.recovered.is_empty() {
         "Dynamic code loading attempted".to_string()
     } else if ran_runtime_code {
-        format!("Runtime-unpacked DEX recovered and executed ({} method(s))", runtime_methods.len())
+        format!(
+            "Runtime-unpacked DEX recovered and executed ({} method(s))",
+            runtime_methods.len()
+        )
     } else {
         "Runtime-unpacked DEX recovered (not observed executing)".to_string()
     };
@@ -232,24 +241,16 @@ fn runtime_payload(input: &ReportInput<'_>, graph: &crate::CallGraph, out: &mut 
         severity,
         summary,
         indicators,
-        evidence: loads.iter().map(|e| ev(e, e.result.clone().unwrap_or_default())).collect(),
+        evidence: loads
+            .iter()
+            .map(|e| ev(e, e.result.clone().unwrap_or_default()))
+            .collect(),
         call_path: loads
             .first()
             .map(|e| call_path(graph, &e.caller))
             .unwrap_or_default(),
         technique: Some("T1406 Obfuscated Files or Information"),
     });
-}
-
-fn is_runtime_method(method: &str, input: &ReportInput<'_>) -> bool {
-    // Authoritative: the interpreter tags every MethodEnter with the layer that
-    // owns the method body, so a `RecoveredDex` entry means the code came from
-    // a payload recovered during this run.
-    input.events.iter().any(|e| {
-        e.kind == EventKind::MethodEnter
-            && e.subject == method
-            && e.layer == Layer::RecoveredDex
-    })
 }
 
 fn build_runtime_summary(input: &ReportInput<'_>, ran: bool) -> String {
@@ -275,10 +276,7 @@ fn build_runtime_summary(input: &ReportInput<'_>, ran: bool) -> String {
 fn egress(input: &ReportInput<'_>, graph: &crate::CallGraph, out: &mut Vec<Finding>) {
     if input.requests.is_empty() {
         // Still surface an attempted-but-unmodelled egress if we saw one.
-        let any = input
-            .events
-            .iter()
-            .find(|e| e.kind == EventKind::Egress);
+        let any = input.events.iter().find(|e| e.kind == EventKind::Egress);
         if let Some(e) = any {
             out.push(Finding {
                 rule: Rule::Egress.id(),
@@ -322,8 +320,14 @@ fn egress(input: &ReportInput<'_>, graph: &crate::CallGraph, out: &mut Vec<Findi
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
             .collect();
-        let runtime_derived = prov.iter().any(|p| p.contains("decoded") || p.contains("built"));
-        let severity = if runtime_derived { Severity::Critical } else { Severity::High };
+        let runtime_derived = prov
+            .iter()
+            .any(|p| p.contains("decoded") || p.contains("built"));
+        let severity = if runtime_derived {
+            Severity::Critical
+        } else {
+            Severity::High
+        };
         let evidence: Vec<Evidence> = input
             .events
             .iter()
@@ -335,9 +339,8 @@ fn egress(input: &ReportInput<'_>, graph: &crate::CallGraph, out: &mut Vec<Findi
             title: format!("Network request to {url}"),
             severity,
             summary: format!(
-                "{} request(s) to {url}{}. Body: {}{}. Provenance of the body data: {}.",
+                "{} request(s) to {url}. Body: {}{}. Provenance of the body data: {}.",
                 reqs.len(),
-                if reqs[0].method.is_empty() { "" } else { "" },
                 bodies.join(" / "),
                 if runtime_derived {
                     " — the body was assembled or decrypted at runtime, not a constant in the APK"
@@ -363,10 +366,7 @@ fn sms(input: &ReportInput<'_>, graph: &crate::CallGraph, out: &mut Vec<Finding>
     if hits.is_empty() {
         return;
     }
-    let dests: Vec<String> = hits
-        .iter()
-        .filter_map(|e| e.args.get(1).cloned())
-        .collect();
+    let dests: Vec<String> = hits.iter().filter_map(|e| e.args.get(1).cloned()).collect();
     out.push(Finding {
         rule: Rule::Sms.id(),
         title: format!("Sends SMS to {}", dests.join(", ")),
@@ -375,7 +375,10 @@ fn sms(input: &ReportInput<'_>, graph: &crate::CallGraph, out: &mut Vec<Finding>
                   can subscribe the user to a premium number or spread links to contacts."
             .into(),
         indicators: dests,
-        evidence: hits.iter().map(|e| ev(e, e.result.clone().unwrap_or_default())).collect(),
+        evidence: hits
+            .iter()
+            .map(|e| ev(e, e.result.clone().unwrap_or_default()))
+            .collect(),
         call_path: call_path(graph, &hits[0].caller),
         technique: Some("T1582 SMS Control"),
     });
@@ -399,7 +402,10 @@ fn shell(input: &ReportInput<'_>, graph: &crate::CallGraph, out: &mut Vec<Findin
                   escalates to root, drops payloads and reads protected state."
             .into(),
         indicators: cmds,
-        evidence: hits.iter().map(|e| ev(e, e.result.clone().unwrap_or_default())).collect(),
+        evidence: hits
+            .iter()
+            .map(|e| ev(e, e.result.clone().unwrap_or_default()))
+            .collect(),
         call_path: call_path(graph, &hits[0].caller),
         technique: Some("T1623 Command and Scripting Interpreter"),
     });
@@ -453,7 +459,10 @@ fn probes(input: &ReportInput<'_>, graph: &crate::CallGraph, out: &mut Vec<Findi
                       it takes a benign path and the real behaviour never runs."
                 .into(),
             indicators: paths,
-            evidence: root.iter().map(|e| ev(e, e.result.clone().unwrap_or_default())).collect(),
+            evidence: root
+                .iter()
+                .map(|e| ev(e, e.result.clone().unwrap_or_default()))
+                .collect(),
             call_path: call_path(graph, &root[0].caller),
             technique: Some("T1497 Virtualization/Sandbox Evasion"),
         });
@@ -467,11 +476,17 @@ fn probes(input: &ReportInput<'_>, graph: &crate::CallGraph, out: &mut Vec<Findi
         for e in &emu {
             for a in &e.args {
                 if let Some((k, v)) = a.split_once(" = ") {
-                    props.entry(k.to_string()).or_default().insert(v.to_string());
+                    props
+                        .entry(k.to_string())
+                        .or_default()
+                        .insert(v.to_string());
                 }
             }
             if !e.subject.starts_with("android.os.Build") {
-                props.entry(e.subject.clone()).or_default().insert("observed".into());
+                props
+                    .entry(e.subject.clone())
+                    .or_default()
+                    .insert("observed".into());
             }
         }
         let mut indicators: Vec<String> = Vec::new();
@@ -479,7 +494,10 @@ fn probes(input: &ReportInput<'_>, graph: &crate::CallGraph, out: &mut Vec<Findi
             if values.len() == 1 {
                 indicators.push(prop);
             } else {
-                indicators.push(format!("{prop}: {}", values.into_iter().collect::<Vec<_>>().join(" vs ")));
+                indicators.push(format!(
+                    "{prop}: {}",
+                    values.into_iter().collect::<Vec<_>>().join(" vs ")
+                ));
             }
         }
         out.push(Finding {
@@ -491,7 +509,10 @@ fn probes(input: &ReportInput<'_>, graph: &crate::CallGraph, out: &mut Vec<Findi
                       determine whether the payload below would ever run in production."
                 .into(),
             indicators,
-            evidence: emu.iter().map(|e| ev(e, e.result.clone().unwrap_or_default())).collect(),
+            evidence: emu
+                .iter()
+                .map(|e| ev(e, e.result.clone().unwrap_or_default()))
+                .collect(),
             call_path: call_path(graph, &emu[0].caller),
             technique: Some("T1497.001 System Checks"),
         });
@@ -521,7 +542,10 @@ fn time_gates(input: &ReportInput<'_>, graph: &crate::CallGraph, out: &mut Vec<F
                   The pipeline runs several clock offsets and unions the results for this reason."
             .into(),
         indicators: time_reads.iter().map(|e| e.subject.clone()).collect(),
-        evidence: time_reads.iter().map(|e| ev(e, e.result.clone().unwrap_or_default())).collect(),
+        evidence: time_reads
+            .iter()
+            .map(|e| ev(e, e.result.clone().unwrap_or_default()))
+            .collect(),
         call_path: call_path(graph, &time_reads[0].caller),
         technique: Some("T1497.003 Time Based Evasion"),
     });
@@ -548,7 +572,10 @@ fn native(input: &ReportInput<'_>, graph: &crate::CallGraph, out: &mut Vec<Findi
                   analysis does not see it."
             .into(),
         indicators: hits.iter().map(|e| e.args.join(" ")).collect(),
-        evidence: hits.iter().map(|e| ev(e, e.result.clone().unwrap_or_default())).collect(),
+        evidence: hits
+            .iter()
+            .map(|e| ev(e, e.result.clone().unwrap_or_default()))
+            .collect(),
         call_path: call_path(graph, &hits[0].caller),
         technique: Some("T1027 Obfuscated Files or Information"),
     });
@@ -578,7 +605,10 @@ fn reflection(input: &ReportInput<'_>, graph: &crate::CallGraph, out: &mut Vec<F
                   hand-off into recovered code."
             .into(),
         indicators: hits.iter().map(|e| e.subject.clone()).collect(),
-        evidence: hits.iter().map(|e| ev(e, e.result.clone().unwrap_or_default())).collect(),
+        evidence: hits
+            .iter()
+            .map(|e| ev(e, e.result.clone().unwrap_or_default()))
+            .collect(),
         call_path: call_path(graph, &hits[0].caller),
         technique: Some("T1620 Reflective Code Loading"),
     });

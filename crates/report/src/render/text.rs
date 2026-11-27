@@ -57,7 +57,11 @@ fn header(o: &mut String, r: &Report) {
 
 fn summary(o: &mut String, r: &Report) {
     let score = overall_score(&r.findings);
-    let top = r.findings.first().map(|f| f.severity).unwrap_or(Severity::Info);
+    let top = r
+        .findings
+        .first()
+        .map(|f| f.severity)
+        .unwrap_or(Severity::Info);
     o.push_str(&format!(
         " VERDICT: {} (score {})   {} finding(s)\n",
         verdict(top, &r.findings),
@@ -123,18 +127,12 @@ fn findings(o: &mut String, r: &Report) {
         if !f.evidence.is_empty() {
             o.push_str("    evidence:\n");
             for e in f.evidence.iter().take(6) {
-                let line = e
-                    .line
-                    .map(|l| format!(":{l}"))
-                    .unwrap_or_default();
+                let line = e.line.map(|l| format!(":{l}")).unwrap_or_default();
                 let txt = format!("#{} {} {}{} :: {}", e.seq, e.caller, line, "", e.detail);
                 wrap(o, &txt, 6, WIDTH);
             }
             if f.evidence.len() > 6 {
-                o.push_str(&format!(
-                    "      … {} more event(s)\n",
-                    f.evidence.len() - 6
-                ));
+                o.push_str(&format!("      … {} more event(s)\n", f.evidence.len() - 6));
             }
         }
     }
@@ -193,7 +191,15 @@ fn callgraph(o: &mut String, r: &Report) {
         r.facts
             .entry_classes
             .iter()
-            .filter(|c| r.graph.order.iter().any(|m| m.starts_with(&c.trim_start_matches('L').trim_end_matches(';').replace('/', "."))))
+            .filter(|c| {
+                r.graph.order.iter().any(|m| {
+                    m.starts_with(
+                        &c.trim_start_matches('L')
+                            .trim_end_matches(';')
+                            .replace('/', "."),
+                    )
+                })
+            })
             .cloned()
             .collect()
     };
@@ -208,7 +214,8 @@ fn callgraph(o: &mut String, r: &Report) {
             .trim_start_matches('L')
             .trim_end_matches(';')
             .replace('/', ".");
-        let entry = r.graph
+        let entry = r
+            .graph
             .order
             .iter()
             .find(|m| m.starts_with(&dotted))
@@ -279,8 +286,16 @@ fn facts(o: &mut String, r: &Report) {
     rule(o, '-');
     o.push_str(" STATIC FACTS\n");
     rule(o, '-');
-    o.push_str(&format!(" permissions ({}): {}\n", r.facts.permissions.len(), r.facts.permissions.join(", ")));
-    o.push_str(&format!(" exported components ({}): {}\n", r.facts.exported_components.len(), r.facts.exported_components.join(", ")));
+    o.push_str(&format!(
+        " permissions ({}): {}\n",
+        r.facts.permissions.len(),
+        r.facts.permissions.join(", ")
+    ));
+    o.push_str(&format!(
+        " exported components ({}): {}\n",
+        r.facts.exported_components.len(),
+        r.facts.exported_components.join(", ")
+    ));
     o.push_str(&format!(" dex: {}\n", r.facts.dex_files.join(", ")));
     o.push_str(&format!(" abis: {}\n", r.facts.native_abis.join(", ")));
     if !r.facts.packer_hits.is_empty() {

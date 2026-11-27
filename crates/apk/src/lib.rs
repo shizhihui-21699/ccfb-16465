@@ -188,9 +188,7 @@ impl Apk {
             .order
             .iter()
             .filter(|n| {
-                n.starts_with("classes")
-                    && n.ends_with(".dex")
-                    && n.len() > "classes.dex".len() - 4
+                n.starts_with("classes") && n.ends_with(".dex") && n.len() > "classes.dex".len() - 4
             })
             .cloned()
             .collect();

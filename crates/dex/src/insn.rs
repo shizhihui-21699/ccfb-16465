@@ -51,11 +51,29 @@ impl Format {
     pub fn width(self) -> u32 {
         match self {
             Format::F10x | Format::F12x | Format::F11n | Format::F11x | Format::F10t => 1,
-            Format::F20t | Format::F22x | Format::F21t | Format::F21s | Format::F21h
-            | Format::F21c | Format::F23x | Format::F22b | Format::F22t | Format::F22s
-            | Format::F22c | Format::F20bc | Format::F22cs => 2,
-            Format::F32x | Format::F30t | Format::F31t | Format::F31i | Format::F31c
-            | Format::F35c | Format::F3rc | Format::F35mi | Format::F35ms | Format::F3rmi
+            Format::F20t
+            | Format::F22x
+            | Format::F21t
+            | Format::F21s
+            | Format::F21h
+            | Format::F21c
+            | Format::F23x
+            | Format::F22b
+            | Format::F22t
+            | Format::F22s
+            | Format::F22c
+            | Format::F20bc
+            | Format::F22cs => 2,
+            Format::F32x
+            | Format::F30t
+            | Format::F31t
+            | Format::F31i
+            | Format::F31c
+            | Format::F35c
+            | Format::F3rc
+            | Format::F35mi
+            | Format::F35ms
+            | Format::F3rmi
             | Format::F3rms => 3,
             Format::F45cc | Format::F4rcc => 4,
             Format::F51l => 5,
@@ -512,7 +530,7 @@ pub fn decode(insns: &[u16]) -> Vec<Insn> {
                     let element_width = insns[pc + 1] as usize;
                     let size = (insns[pc + 2] as usize) | ((insns[pc + 3] as usize) << 16);
                     let bytes = element_width.max(1) * size;
-                    let units = (bytes + 1) / 2;
+                    let units = bytes.div_ceil(2);
                     let width = (units + 4) as u32;
                     out.push(Insn {
                         pc: pc as u32,
@@ -640,18 +658,17 @@ pub fn decode(insns: &[u16]) -> Vec<Insn> {
                 insn.b = get(2);
             }
             Format::F30t => {
-                let off = ((get(1) as i32) | ((get(2) as i32) << 16)) as i32;
+                let off = (get(1) as i32) | ((get(2) as i32) << 16);
                 insn.target = Some((insn.pc as i64 + off as i64) as u32);
             }
             Format::F31t => {
                 insn.a = (get(0) >> 8) & 0xff;
-                let off = ((get(1) as i32) | ((get(2) as i32) << 16)) as i32;
+                let off = (get(1) as i32) | ((get(2) as i32) << 16);
                 insn.target = Some((insn.pc as i64 + off as i64) as u32);
             }
             Format::F31i => {
                 insn.a = (get(0) >> 8) & 0xff;
-                insn.literal =
-                    (get(1) as i32 | ((get(2) as i32) << 16)) as i64;
+                insn.literal = (get(1) as i32 | ((get(2) as i32) << 16)) as i64;
             }
             Format::F31c => {
                 insn.a = (get(0) >> 8) & 0xff;
@@ -773,7 +790,12 @@ pub fn render(insn: &Insn) -> String {
             format!("{m} {{{}}}, @{}", regs.join(", "), insn.b)
         }
         Format::F3rc | Format::F4rcc => {
-            format!("{m} {{v{}..v{}}}, @{}", insn.c, insn.c + insn.a.saturating_sub(1), insn.b)
+            format!(
+                "{m} {{v{}..v{}}}, @{}",
+                insn.c,
+                insn.c + insn.a.saturating_sub(1),
+                insn.b
+            )
         }
         Format::F51l => format!("{m} v{}, #{}L", insn.a, insn.literal),
         Format::F20bc => format!("{m} v{}, @{}", insn.a, insn.b),

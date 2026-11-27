@@ -18,11 +18,11 @@
 //!    budget to give the first pass.
 
 use crate::outcome::Outcome;
-use unhusk_report::StaticFacts;
 use unhusk_apk::Apk;
-use unhusk_vm::analysis::{analyze, Analysis, AnalysisConfig};
+use unhusk_report::StaticFacts;
+use unhusk_vm::analysis::{analyze, AnalysisConfig};
 use unhusk_vm::env::{naive_emulator_profile, pixel_profile};
-use unhusk_vm::events::{Event, EventKind, Trace};
+use unhusk_vm::events::{Event, Trace};
 use unhusk_vm::interp::program::RecoveredDex;
 use unhusk_vm::limits::Limits;
 
@@ -58,7 +58,7 @@ pub struct Merged {
 
 pub fn run(apk: &Apk, cfg: &PipelineConfig) -> Merged {
     let facts = static_facts(apk);
-    let dex_count = apk.dex_names().len().max(1) as u64;
+    let _dex_count = apk.dex_names().len().max(1) as u64;
 
     // Per-pass budget: divide the instruction budget so four window passes plus
     // the comparison run stay inside it.
@@ -88,8 +88,15 @@ pub fn run(apk: &Apk, cfg: &PipelineConfig) -> Merged {
     let offsets: Vec<i64> = match cfg.windows {
         0 | 1 => vec![0],
         n => {
-            let base_offsets = [0i64, 365 * DAY, 3 * 365 * DAY, -365 * DAY, 2 * 365 * DAY, 5 * 365 * DAY];
-            base_offsets[..(n as usize).min(base_offsets.len())].to_vec()
+            let base_offsets = [
+                0i64,
+                365 * DAY,
+                3 * 365 * DAY,
+                -365 * DAY,
+                2 * 365 * DAY,
+                5 * 365 * DAY,
+            ];
+            base_offsets[..n.min(base_offsets.len())].to_vec()
         }
     };
 
@@ -104,6 +111,8 @@ pub fn run(apk: &Apk, cfg: &PipelineConfig) -> Merged {
     let mut seq_base = 0u64;
     let mut truncated = false;
 
+    // Passes share one budget and one sequence counter; the closure captures
+    // both so the merged trace has a single, ordered numbering.
     let mut run_pass = |mut c: AnalysisConfig, profile_name: &str| -> Vec<Event> {
         c.profile.name = profile_name.to_string();
         let a = analyze(apk, &c);
@@ -114,8 +123,16 @@ pub fn run(apk: &Apk, cfg: &PipelineConfig) -> Merged {
         seq_base += a.trace().seq;
         total_insns += a.machine.budget.instructions;
         total_ms += a.elapsed.as_millis() as u64;
-        last_stop = format!("{}{}", a.stop.as_str(),
-            a.machine.budget.stop_detail.as_deref().map(|d| format!(": {d}")).unwrap_or_default());
+        last_stop = format!(
+            "{}{}",
+            a.stop.as_str(),
+            a.machine
+                .budget
+                .stop_detail
+                .as_deref()
+                .map(|d| format!(": {d}"))
+                .unwrap_or_default()
+        );
         if a.trace().is_truncated() {
             truncated = true;
         }
@@ -131,7 +148,10 @@ pub fn run(apk: &Apk, cfg: &PipelineConfig) -> Merged {
             }
         }
         for q in a.machine.env.net.requests.iter() {
-            if !all_requests.iter().any(|x: &unhusk_vm::env::RecordedRequest| x.url == q.url && x.body == q.body) {
+            if !all_requests
+                .iter()
+                .any(|x: &unhusk_vm::env::RecordedRequest| x.url == q.url && x.body == q.body)
+            {
                 all_requests.push(q.clone());
             }
         }
@@ -152,7 +172,11 @@ pub fn run(apk: &Apk, cfg: &PipelineConfig) -> Merged {
     for (i, off) in offsets.iter().enumerate() {
         let mut c = base.clone();
         c.clock_offset_ms = *off;
-        let label = if i == 0 { "pixel6-a13".to_string() } else { format!("pixel6-a13+t{}d", off / DAY) };
+        let label = if i == 0 {
+            "pixel6-a13".to_string()
+        } else {
+            format!("pixel6-a13+t{}d", off / DAY)
+        };
         let evs = run_pass(c, &label);
         all_events.extend(evs);
     }
@@ -182,8 +206,9 @@ pub fn run(apk: &Apk, cfg: &PipelineConfig) -> Merged {
     // Clock-window passes that produce genuinely new behaviour survive intact.
     all_events.sort_by_key(|e| e.seq);
     {
-        let mut seen: std::collections::HashSet<(String, String, String, Vec<String>, Option<String>)> =
-            std::collections::HashSet::new();
+        // Identity of an event for cross-pass deduplication.
+        type EventKey = (String, String, String, Vec<String>, Option<String>);
+        let mut seen: std::collections::HashSet<EventKey> = std::collections::HashSet::new();
         all_events.retain(|e| {
             let key = (
                 format!("{:?}", e.kind),
@@ -195,10 +220,12 @@ pub fn run(apk: &Apk, cfg: &PipelineConfig) -> Merged {
             seen.insert(key)
         });
     }
-    let mut trace = Trace::default();
-    trace.events = all_events;
-    trace.seq = seq_base;
-    trace.dropped = if truncated { 1 } else { 0 };
+    let trace = Trace {
+        events: all_events,
+        seq: seq_base,
+        dropped: if truncated { 1 } else { 0 },
+        ..Trace::default()
+    };
 
     let facts = StaticFacts {
         entry_classes: entry_classes(apk),

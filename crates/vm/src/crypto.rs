@@ -85,9 +85,7 @@ pub fn rc4(data: &[u8], key: &[u8]) -> Result<Vec<u8>, CryptoError> {
     }
     let mut j = 0u8;
     for i in 0..256 {
-        j = j
-            .wrapping_add(s[i])
-            .wrapping_add(key[i % key.len()]);
+        j = j.wrapping_add(s[i]).wrapping_add(key[i % key.len()]);
         s.swap(i, j as usize);
     }
     let mut i = 0u8;
@@ -108,8 +106,8 @@ pub fn rc4(data: &[u8], key: &[u8]) -> Result<Vec<u8>, CryptoError> {
 // ---------------------------------------------------------------------------
 
 enum AesBlock {
-    A128(Aes128),
-    A256(Aes256),
+    A128(Box<Aes128>),
+    A256(Box<Aes256>),
 }
 
 impl AesBlock {
@@ -132,12 +130,12 @@ impl AesBlock {
 
 fn aes_new(key: &[u8]) -> Result<AesBlock, CryptoError> {
     match key.len() {
-        16 => Ok(AesBlock::A128(
+        16 => Ok(AesBlock::A128(Box::new(
             Aes128::new_from_slice(key).map_err(|_| CryptoError::BadKeyLength(key.len()))?,
-        )),
-        32 => Ok(AesBlock::A256(
+        ))),
+        32 => Ok(AesBlock::A256(Box::new(
             Aes256::new_from_slice(key).map_err(|_| CryptoError::BadKeyLength(key.len()))?,
-        )),
+        ))),
         // AES-192 is legal but rare in Android malware; support it via the
         // generic API would need another import.
         n => Err(CryptoError::BadKeyLength(n)),
@@ -146,7 +144,7 @@ fn aes_new(key: &[u8]) -> Result<AesBlock, CryptoError> {
 
 pub fn aes_cbc_decrypt(data: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u8>, CryptoError> {
     check_len(data)?;
-    if data.len() % 16 != 0 {
+    if !data.len().is_multiple_of(16) {
         return Err(CryptoError::NotBlockAligned(data.len()));
     }
     if iv.len() != 16 {
@@ -172,7 +170,7 @@ pub fn aes_cbc_decrypt(data: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u8>, Cr
 
 pub fn aes_cbc_encrypt(data: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u8>, CryptoError> {
     check_len(data)?;
-    if data.len() % 16 != 0 {
+    if !data.len().is_multiple_of(16) {
         return Err(CryptoError::NotBlockAligned(data.len()));
     }
     if iv.len() != 16 {
@@ -197,7 +195,7 @@ pub fn aes_cbc_encrypt(data: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u8>, Cr
 
 pub fn aes_ecb_decrypt(data: &[u8], key: &[u8]) -> Result<Vec<u8>, CryptoError> {
     check_len(data)?;
-    if data.len() % 16 != 0 {
+    if !data.len().is_multiple_of(16) {
         return Err(CryptoError::NotBlockAligned(data.len()));
     }
     let cipher = aes_new(key)?;
@@ -261,10 +259,7 @@ pub fn strip_pkcs7(data: &[u8]) -> (Vec<u8>, bool) {
 
 pub fn base64_decode(s: &str) -> Option<Vec<u8>> {
     use base64::Engine;
-    let cleaned: String = s
-        .chars()
-        .filter(|c| !c.is_whitespace())
-        .collect();
+    let cleaned: String = s.chars().filter(|c| !c.is_whitespace()).collect();
     // Android's Base64.DEFAULT accepts URL-safe alphabets depending on flags;
     // try standard then URL-safe.
     base64::engine::general_purpose::STANDARD
@@ -282,7 +277,7 @@ pub fn base64_encode(data: &[u8]) -> String {
 
 pub fn hex_decode(s: &str) -> Option<Vec<u8>> {
     let s = s.trim();
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return None;
     }
     let mut out = Vec::with_capacity(s.len() / 2);
@@ -461,14 +456,16 @@ mod tests {
     #[test]
     fn hash_known_vectors() {
         assert_eq!(
-            HashAlg::Md5.digest(b"abc")
+            HashAlg::Md5
+                .digest(b"abc")
                 .iter()
                 .map(|b| format!("{b:02x}"))
                 .collect::<String>(),
             "900150983cd24fb0d6963f7d28e17f72"
         );
         assert_eq!(
-            HashAlg::Sha256.digest(b"abc")
+            HashAlg::Sha256
+                .digest(b"abc")
                 .iter()
                 .map(|b| format!("{b:02x}"))
                 .collect::<String>(),

@@ -81,7 +81,11 @@ pub fn obs(level: Level, category: &'static str, result: impl Into<String>) -> O
 
 impl Machine {
     /// Route a model call to the right handler by class.
-    pub(crate) fn call_model(&mut self, mr: &MethodRef, args: &[Value]) -> (Option<Value>, Option<Observation>) {
+    pub(crate) fn call_model(
+        &mut self,
+        mr: &MethodRef,
+        args: &[Value],
+    ) -> (Option<Value>, Option<Observation>) {
         let class = mr.class.trim_start_matches('L').trim_end_matches(';');
         let r = if class.starts_with("java/")
             || class.starts_with("javax/")
@@ -105,13 +109,20 @@ impl Machine {
     /// Record an API observation, attributing it to `caller` explicitly. The
     /// explicit form matters for handlers that push a frame (reflection), where
     /// the top of the stack at record time is the callee, not the invoker.
-    pub fn record_call_from(&mut self, mr: &MethodRef, args: &[Value], o: &Observation, caller: String) {
+    pub fn record_call_from(
+        &mut self,
+        mr: &MethodRef,
+        args: &[Value],
+        o: &Observation,
+        caller: String,
+    ) {
         use crate::events::{Event, EventKind, Layer};
         let level_ok = self.policy.record_all_apis || o.level != Level::Routine;
         if !level_ok {
             return;
         }
-        let display_args: Vec<String> = args.iter().take(6).map(|v| self.render_value(*v)).collect();
+        let display_args: Vec<String> =
+            args.iter().take(6).map(|v| self.render_value(*v)).collect();
         let kind = match o.category {
             "egress" => EventKind::Egress,
             "evasion" => EventKind::Evasion,
@@ -123,7 +134,11 @@ impl Machine {
             _ => EventKind::ApiCall,
         };
         let line = self.frames.last().and_then(|f| {
-            self.program.method(f.method).code.as_ref().and_then(|c| c.line_for(f.pc))
+            self.program
+                .method(f.method)
+                .code
+                .as_ref()
+                .and_then(|c| c.line_for(f.pc))
         });
         self.trace.push(Event {
             seq: 0,
@@ -232,7 +247,9 @@ impl Machine {
     }
 
     pub fn model_string(&self, id: u32, key: &str) -> Option<String> {
-        self.model_field(id, key).and_then(|v| v.as_str()).map(|s| s.to_string())
+        self.model_field(id, key)
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
     }
 
     pub fn value_path(&self, v: Option<&Value>) -> Option<String> {

@@ -35,11 +35,14 @@ impl Machine {
             self.budget.stop(StopReason::Budget, "recovered DEX limit");
             return;
         }
-        let name = format!(
-            "decoded@{:x}.dex",
-            self.budget.instructions
+        let name = format!("decoded@{:x}.dex", self.budget.instructions);
+        self.recover_dex_bytes(
+            data,
+            name,
+            Recovery::DecryptedInApk,
+            source.to_string(),
+            category,
         );
-        self.recover_dex_bytes(data, name, Recovery::DecryptedInApk, source.to_string(), category);
     }
 
     /// A classloader was constructed over `path`. If we saw a DEX written
@@ -57,7 +60,10 @@ impl Machine {
             .or_else(|| self.pending_files.get(&normalized).cloned())
             .or_else(|| {
                 // The APK's own assets may be the payload.
-                self.env.assets.get(normalized.trim_start_matches('/')).cloned()
+                self.env
+                    .assets
+                    .get(normalized.trim_start_matches('/'))
+                    .cloned()
             });
         let Some(data) = data else {
             self.emit(
@@ -74,7 +80,11 @@ impl Machine {
             // A ZIP of classes*.dex (a nested APK/jar) is the other common form.
             if crate::crypto::looks_like_zip(&data) {
                 if let Some(inner) = self.dex_from_zip(&data) {
-                    let base = normalized.rsplit('/').next().unwrap_or(&normalized).to_string();
+                    let base = normalized
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or(&normalized)
+                        .to_string();
                     self.recover_dex_bytes(
                         inner,
                         format!("{base}!"),
@@ -95,7 +105,11 @@ impl Machine {
             );
             return;
         }
-        let base = normalized.rsplit('/').next().unwrap_or(&normalized).to_string();
+        let base = normalized
+            .rsplit('/')
+            .next()
+            .unwrap_or(&normalized)
+            .to_string();
         self.recover_dex_bytes(
             data,
             base,
@@ -112,11 +126,23 @@ impl Machine {
         }
         if crate::crypto::looks_like_zip(&bytes) {
             if let Some(inner) = self.dex_from_zip(&bytes) {
-                self.recover_dex_bytes(inner, source.clone(), Recovery::Downloaded(source.clone()), source, "load");
+                self.recover_dex_bytes(
+                    inner,
+                    source.clone(),
+                    Recovery::Downloaded(source.clone()),
+                    source,
+                    "load",
+                );
                 return;
             }
         }
-        self.recover_dex_bytes(bytes, source.clone(), Recovery::Downloaded(source.clone()), source, "load");
+        self.recover_dex_bytes(
+            bytes,
+            source.clone(),
+            Recovery::Downloaded(source.clone()),
+            source,
+            "load",
+        );
     }
 
     fn dex_from_zip(&self, zip_bytes: &[u8]) -> Option<Vec<u8>> {
@@ -182,7 +208,9 @@ impl Machine {
                     Layer::RecoveredDex,
                     self.current_method_display(),
                     source.clone(),
-                    vec![format!("{name} ({classes} classes, {methods} methods, sha1 {sha1})")],
+                    vec![format!(
+                        "{name} ({classes} classes, {methods} methods, sha1 {sha1})"
+                    )],
                     Some(format!("recovered DEX added as dex#{dex_idx}")),
                 );
                 Some(dex_idx)
@@ -224,7 +252,10 @@ impl Machine {
             if m.is_static
                 && m.code.is_some()
                 && m.name != "<clinit>"
-                && matches!(m.name.as_str(), "run" | "start" | "init" | "attachBaseContext" | "onCreate")
+                && matches!(
+                    m.name.as_str(),
+                    "run" | "start" | "init" | "attachBaseContext" | "onCreate"
+                )
             {
                 to_run.push((m.name.clone(), m.proto.params.clone()));
             }
@@ -250,7 +281,11 @@ impl Machine {
     /// `ClassLoader.loadClass` / reflection: recover the class if its defining
     /// DEX has been loaded, then run it.
     pub(crate) fn note_class_load(&mut self, name: &str) {
-        let desc = if name.starts_with('L') { name.to_string() } else { format!("L{};", name.replace('.', "/")) };
+        let desc = if name.starts_with('L') {
+            name.to_string()
+        } else {
+            format!("L{};", name.replace('.', "/"))
+        };
         let exists = self.program.class_exists(&desc);
         if exists {
             self.invoke_loaded_class(&desc);
@@ -356,7 +391,10 @@ impl Machine {
                     crate::events::Layer::Native,
                     self.current_method_display(),
                     mr.signature(),
-                    vec![format!("looked for export {jni_name} in {} library(ies)", libs.len())],
+                    vec![format!(
+                        "looked for export {jni_name} in {} library(ies)",
+                        libs.len()
+                    )],
                     Some("native method not resolvable to a shipped library".into()),
                 );
                 return None;
@@ -420,7 +458,7 @@ impl Machine {
                             m.write_mem(next, &b);
                             handles.push((*id, next, b.len()));
                             m.regs[slot] = next;
-                            next += (b.len() as u64 + 15) / 16 * 16 + 16;
+                            next += (b.len() as u64).div_ceil(16) * 16 + 16;
                         }
                         None => m.regs[slot] = 0x7000_0000 + i as u64,
                     }
@@ -433,9 +471,12 @@ impl Machine {
         m.regs[1] = 0x7000_0000;
 
         let entry_off = entry_vaddr.saturating_sub(code_vaddr);
-        let outcome = m.run(m.mem_base + entry_off, &NativeLimits {
-            max_steps: self.policy.native_steps,
-        });
+        let outcome = m.run(
+            m.mem_base + entry_off,
+            &NativeLimits {
+                max_steps: self.policy.native_steps,
+            },
+        );
         let steps = outcome.steps();
         let detail = match &outcome {
             NativeOutcome::Returned { .. } => "returned".to_string(),
@@ -454,7 +495,9 @@ impl Machine {
         // its ciphertext and the unpacking chain stops here.
         let mut recovered_here: Vec<(Vec<u8>, String)> = Vec::new();
         for (id, addr, len) in handles.clone() {
-            let Some(written) = m.read_mem(addr, len).map(|b| b.to_vec()) else { continue };
+            let Some(written) = m.read_mem(addr, len).map(|b| b.to_vec()) else {
+                continue;
+            };
             if let Some(crate::heap::Object::Array { bytes, prov, .. }) = self.heap.get_mut(id) {
                 if bytes.len() == written.len() && bytes[..] != written[..] {
                     bytes.copy_from_slice(&written);
@@ -478,7 +521,8 @@ impl Machine {
                     if len > 8 && len < 32 * 1024 * 1024 {
                         if let Some(full) = m.read_mem(off, len) {
                             if crate::crypto::looks_like_dex(full) {
-                                recovered_here.push((full.to_vec(), format!("native:{jni_name}@0x{off:x}")));
+                                recovered_here
+                                    .push((full.to_vec(), format!("native:{jni_name}@0x{off:x}")));
                             }
                         }
                     }
@@ -493,7 +537,14 @@ impl Machine {
             mr.signature(),
             vec![format!("{path} :: {jni_name}, {steps} steps")],
             Some(if complete {
-                format!("native returned; {detail}{}", if recovered_here.is_empty() { String::new() } else { format!(", {} payload(s) produced", recovered_here.len()) })
+                format!(
+                    "native returned; {detail}{}",
+                    if recovered_here.is_empty() {
+                        String::new()
+                    } else {
+                        format!(", {} payload(s) produced", recovered_here.len())
+                    }
+                )
             } else {
                 format!("native emulation incomplete: {detail}")
             }),
@@ -506,7 +557,11 @@ impl Machine {
             use sha1::{Digest, Sha1};
             let mut h = Sha1::new();
             h.update(&bytes);
-            let sha1 = h.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>();
+            let sha1 = h
+                .finalize()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>();
             match unhusk_dex::parse(&bytes) {
                 Ok(dex) => {
                     let classes = dex.classes.len();
@@ -526,14 +581,18 @@ impl Machine {
                     self.recovered_payloads.push((name.clone(), bytes.clone()));
                     let dex_idx = self.program.add_dex(
                         dex,
-                        Some(crate::interp::program::Recovery::NativeExtracted(path.clone())),
+                        Some(crate::interp::program::Recovery::NativeExtracted(
+                            path.clone(),
+                        )),
                     );
                     self.emit(
                         crate::events::EventKind::DynamicLoad,
                         crate::events::Layer::RecoveredDex,
                         self.current_method_display(),
                         format!("{path} :: {jni_name}"),
-                        vec![format!("{name} ({classes} classes, {methods} methods, sha1 {sha1})")],
+                        vec![format!(
+                            "{name} ({classes} classes, {methods} methods, sha1 {sha1})"
+                        )],
                         Some(format!("recovered DEX added as dex#{dex_idx}")),
                     );
                 }
@@ -584,6 +643,5 @@ pub fn jni_symbol(class_desc: &str, name: &str) -> String {
 /// Does this ELF's dynamic symbol table contain `symbol`?
 fn elf_exports(data: &[u8], symbol: &str) -> bool {
     // Cheap and robust enough: a JNI export name appears verbatim in .dynstr.
-    data.windows(symbol.len())
-        .any(|w| w == symbol.as_bytes())
+    data.windows(symbol.len()).any(|w| w == symbol.as_bytes())
 }

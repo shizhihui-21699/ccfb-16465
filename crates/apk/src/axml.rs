@@ -5,8 +5,7 @@
 //! typed attribute values. We decode it into a small tree; we never trust the
 //! declared sizes beyond the enclosing chunk boundary.
 
-use crate::error::{ApkError, Result};
-use std::collections::HashMap;
+use crate::error::ApkError;
 
 pub type ResultT<T> = std::result::Result<T, ApkError>;
 
@@ -282,7 +281,9 @@ pub fn parse(data: &[u8]) -> ResultT<Document> {
     let file_size = rd_u32(data, 4)? as usize;
     let limit = file_size.min(data.len());
 
-    let mut pool = StringPool { strings: Vec::new() };
+    let mut pool = StringPool {
+        strings: Vec::new(),
+    };
     let mut resource_ids: Vec<u32> = Vec::new();
     let mut off = file_header;
     // Element stack built from the flat record stream.
@@ -320,7 +321,7 @@ pub fn parse(data: &[u8]) -> ResultT<Document> {
                 let attr_size = rd_u16(data, ext + 10)? as usize;
                 let attr_count = rd_u16(data, ext + 12)? as usize;
                 let name = pool.get(name_idx).unwrap_or("").to_string();
-                let ns = if ns_idx == u32::MAX {
+                let _ns = if ns_idx == u32::MAX {
                     None
                 } else {
                     pool.get(ns_idx).map(|s| s.to_string())
@@ -345,9 +346,7 @@ pub fn parse(data: &[u8]) -> ResultT<Document> {
                         TYPE_NULL => Value::Null,
                         TYPE_REFERENCE => Value::Reference(dvalue),
                         TYPE_ATTRIBUTE => Value::Attribute(dvalue),
-                        TYPE_STRING => Value::String(
-                            pool.get(dvalue).unwrap_or("").to_string(),
-                        ),
+                        TYPE_STRING => Value::String(pool.get(dvalue).unwrap_or("").to_string()),
                         TYPE_FLOAT => Value::Float(f32::from_bits(dvalue)),
                         TYPE_INT_DEC => Value::Int(dvalue as i32),
                         TYPE_INT_HEX => Value::Int(dvalue as i32),
@@ -379,7 +378,11 @@ pub fn parse(data: &[u8]) -> ResultT<Document> {
                 // Open elements live on the stack; they are attached to their
                 // parent (in document order) when their end record arrives, so
                 // sibling order is preserved without index juggling.
-                stack.push(Element { name, attributes, children: Vec::new() });
+                stack.push(Element {
+                    name,
+                    attributes,
+                    children: Vec::new(),
+                });
             }
             RES_XML_END_ELEMENT => {
                 if let Some(done) = stack.pop() {
@@ -395,7 +398,11 @@ pub fn parse(data: &[u8]) -> ResultT<Document> {
         off += chunk_size;
     }
     let root = root.ok_or_else(|| ApkError::new("axml: document has no root element"))?;
-    Ok(Document { root, pool: pool.strings, resource_ids })
+    Ok(Document {
+        root,
+        pool: pool.strings,
+        resource_ids,
+    })
 }
 
 fn android_attr_name(res: u32) -> &'static str {
@@ -409,7 +416,7 @@ fn android_attr_name(res: u32) -> &'static str {
         0x0101_0006 => "permission",
         0x0101_0007 => "readPermission",
         0x0101_0008 => "writePermission",
-        0x0101_0009 | 0x0101_000a | 0x0101_000b => "protectionLevel",
+        0x0101_0009..=0x0101_000b => "protectionLevel",
         0x0101_000c => "permissionGroup",
         0x0101_000d => "sharedUserId",
         0x0101_000e => "hasCode",

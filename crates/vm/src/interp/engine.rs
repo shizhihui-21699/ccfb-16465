@@ -19,7 +19,6 @@ use crate::interp::state::{Frame, Policy};
 use crate::limits::{Budget, Limits, StopReason};
 use crate::value::Value;
 use unhusk_dex::insn::InsnKind;
-use unhusk_dex::DexFile;
 
 /// Outcome of starting execution.
 pub struct RunStats {
@@ -32,7 +31,11 @@ pub struct RunStats {
 
 impl Machine {
     pub fn new(program: Program, env: crate::env::Env, limits: Limits, policy: Policy) -> Self {
-        let trace_cap = if policy.record_all_apis { DEFAULT_TRACE_CAP } else { DEFAULT_TRACE_CAP / 2 };
+        let trace_cap = if policy.record_all_apis {
+            DEFAULT_TRACE_CAP
+        } else {
+            DEFAULT_TRACE_CAP / 2
+        };
         Self {
             program,
             heap: Heap::new(limits.max_heap_objects),
@@ -54,6 +57,7 @@ impl Machine {
             granted_permissions: Vec::new(),
             executed: Vec::new(),
             entered: Default::default(),
+            pending_result: None,
             native_libraries: Vec::new(),
             loaded_libraries: Vec::new(),
             class_states: Default::default(),
@@ -61,7 +65,15 @@ impl Machine {
         }
     }
 
-    pub fn emit(&mut self, kind: EventKind, layer: Layer, caller: String, subject: String, args: Vec<String>, result: Option<String>) {
+    pub fn emit(
+        &mut self,
+        kind: EventKind,
+        layer: Layer,
+        caller: String,
+        subject: String,
+        args: Vec<String>,
+        result: Option<String>,
+    ) {
         let insn = self.budget.instructions;
         self.trace.push(Event {
             seq: 0,
@@ -85,7 +97,13 @@ impl Machine {
     }
 
     /// Push a frame for `handle` with the given argument values.
-    pub fn push_frame(&mut self, handle: MethodHandle, args: Vec<Value>, call_site: Option<(MethodHandle, u32)>, result_to: Option<(u16, bool, bool)>) -> Result<(), StopReason> {
+    pub fn push_frame(
+        &mut self,
+        handle: MethodHandle,
+        args: Vec<Value>,
+        call_site: Option<(MethodHandle, u32)>,
+        result_to: Option<(u16, bool, bool)>,
+    ) -> Result<(), StopReason> {
         if self.frames.len() >= self.budget.limits.max_call_depth {
             self.budget.stop(StopReason::Budget, "call depth limit");
             return Err(StopReason::Budget);
@@ -97,7 +115,8 @@ impl Machine {
         let total = code.registers_size as usize;
         let ins = code.ins_size as usize;
         if total < ins || total > crate::interp::state::MAX_REGISTERS {
-            self.budget.stop(StopReason::Unsupported, "invalid register count");
+            self.budget
+                .stop(StopReason::Unsupported, "invalid register count");
             return Err(StopReason::Unsupported);
         }
         let mut frame = Frame::new(handle, total, call_site);
@@ -124,7 +143,9 @@ impl Machine {
                 seq: 0,
                 insn,
                 kind: EventKind::MethodEnter,
-                layer: if self.program.origins[handle.dex as usize] == crate::interp::program::MethodOrigin::Recovered {
+                layer: if self.program.origins[handle.dex as usize]
+                    == crate::interp::program::MethodOrigin::Recovered
+                {
                     Layer::RecoveredDex
                 } else {
                     Layer::Dex
@@ -195,8 +216,15 @@ impl Machine {
             self.frames.last_mut().unwrap().pc = insn.pc;
             self.frames.last_mut().unwrap().ip += 1;
             if std::env::var("UNHUSK_TRACE").is_ok() {
-                eprintln!("  [{:04x}] {} | regs={:?}", insn.pc, unhusk_dex::insn::render(&insn),
-                    self.frames.last().map(|f| f.regs.clone()).unwrap_or_default());
+                eprintln!(
+                    "  [{:04x}] {} | regs={:?}",
+                    insn.pc,
+                    unhusk_dex::insn::render(&insn),
+                    self.frames
+                        .last()
+                        .map(|f| f.regs.clone())
+                        .unwrap_or_default()
+                );
             }
             if let Err(r) = self.step(&insn) {
                 return r;
@@ -225,7 +253,11 @@ impl Machine {
                         let f = self.frames.last_mut().unwrap();
                         f.pc = h;
                         f.ip = ip;
-                        let reg = self.program.method(f.method).code.as_ref()
+                        let reg = self
+                            .program
+                            .method(f.method)
+                            .code
+                            .as_ref()
                             .and_then(|c| c.insn_at(h))
                             .map(|i| i.a);
                         if let Some(reg) = reg {
@@ -252,7 +284,8 @@ impl Machine {
                 vec![self.describe_object(exc)],
                 None,
             );
-            self.budget.stop(StopReason::Exception, "uncaught exception");
+            self.budget
+                .stop(StopReason::Exception, "uncaught exception");
             Err(StopReason::Exception)
         }
     }
@@ -260,7 +293,9 @@ impl Machine {
     // Helpers shared with the opcode modules.
 
     pub(crate) fn field_id_at(&mut self, idx: u32) -> u32 {
-        let Some(frame) = self.frames.last() else { return 0 };
+        let Some(frame) = self.frames.last() else {
+            return 0;
+        };
         let dex_idx = frame.method.dex;
         let sig = self
             .program
@@ -300,9 +335,16 @@ impl Machine {
     }
 
     /// Raise a modelled exception. Returns `Err` only when the machine stopped.
-    pub(crate) fn throw_class(&mut self, class: &str, message: impl Into<String>) -> Result<(), StopReason> {
+    pub(crate) fn throw_class(
+        &mut self,
+        class: &str,
+        message: impl Into<String>,
+    ) -> Result<(), StopReason> {
         let msg = message.into();
-        let Some(id) = self.heap.alloc(Object::Throwable { class: class.to_string(), message: msg.clone() }) else {
+        let Some(id) = self.heap.alloc(Object::Throwable {
+            class: class.to_string(),
+            message: msg.clone(),
+        }) else {
             return self.heap_oom();
         };
         if let Some(f) = self.frames.last_mut() {
@@ -336,7 +378,8 @@ impl Machine {
             Some(f) => f,
             None => return Ok(()),
         };
-        self.handlers.retain(|(depth, _)| *depth <= self.frames.len());
+        self.handlers
+            .retain(|(depth, _)| *depth <= self.frames.len());
         if let Some((reg, wide, obj)) = frame.result_to {
             let v = match value {
                 Some(v) => v,
@@ -373,19 +416,28 @@ impl Machine {
             0x02 | 0x05 | 0x08 => self.op_move(insn),
             0x03 | 0x06 | 0x09 => self.op_move(insn),
             0x0e => self.do_return(None),
-            0x0f | 0x10 | 0x11 => {
+            0x0f..=0x11 => {
                 let v = self.reg(insn.a);
                 self.do_return(Some(v))
             }
-            0x0a | 0x0b | 0x0c | 0x0d => {
-                // move-result-family: the value was already written by the call.
+            0x0a..=0x0c => {
+                // move-result-family: normally the callee wrote the register
+                // directly; `filled-new-array` hands its object over here.
+                if let Some(v) = self.pending_result.take() {
+                    if matches!(insn.op, 0x0b) {
+                        self.set_reg_pair(insn.a, v);
+                    } else {
+                        self.set_reg(insn.a, v);
+                    }
+                }
                 Ok(())
             }
-            0x12 | 0x13 | 0x14 | 0x15 => {
+            0x0d => Ok(()),
+            0x12..=0x15 => {
                 self.set_reg(insn.a, Value::I(insn.literal as i32));
                 Ok(())
             }
-            0x16 | 0x17 | 0x18 | 0x19 => {
+            0x16..=0x19 => {
                 self.set_reg(insn.a, Value::J(insn.literal));
                 Ok(())
             }
@@ -400,7 +452,7 @@ impl Machine {
             0x24 | 0x25 => self.op_filled_new_array(insn),
             0x26 => self.op_fill_array_data(insn),
             0x27 => self.op_throw(insn),
-            0x28 | 0x29 | 0x2a => self.op_goto(insn),
+            0x28..=0x2a => self.op_goto(insn),
             0x2b | 0x2c => self.op_switch(insn),
             0x2d..=0x31 => self.op_cmp(insn),
             0x32..=0x37 => self.op_if(insn),
@@ -422,7 +474,11 @@ impl Machine {
             0xfa..=0xff => {
                 self.budget.stop(
                     StopReason::Unsupported,
-                    format!("opcode 0x{:02x} ({}) is not modelled", insn.op, insn.mnemonic()),
+                    format!(
+                        "opcode 0x{:02x} ({}) is not modelled",
+                        insn.op,
+                        insn.mnemonic()
+                    ),
                 );
                 Err(StopReason::Unsupported)
             }
@@ -468,7 +524,9 @@ impl Machine {
     /// class initialiser was pushed, the initialiser frame is on top — rewinding
     /// "the last frame" would rewind the wrong one.
     pub(crate) fn rewind_frame(&mut self, depth: usize, pc: u32) {
-        let Some(f) = self.frames.get_mut(depth) else { return };
+        let Some(f) = self.frames.get_mut(depth) else {
+            return;
+        };
         if let Some(ip) = self
             .program
             .method(f.method)
@@ -483,7 +541,11 @@ impl Machine {
     /// Ensure `descriptor` is initialised and, if a `<clinit>` frame was
     /// pushed, rewind the *current* instruction so it retries afterwards.
     /// Returns `true` when the caller should return immediately.
-    pub(crate) fn init_before_use(&mut self, descriptor: &str, pc: u32) -> Result<bool, StopReason> {
+    pub(crate) fn init_before_use(
+        &mut self,
+        descriptor: &str,
+        pc: u32,
+    ) -> Result<bool, StopReason> {
         let depth = self.frames.len().saturating_sub(1);
         if self.ensure_class_initialised(descriptor)? {
             self.rewind_frame(depth, pc);
@@ -512,11 +574,16 @@ impl Machine {
     pub(crate) fn branch_taken(&mut self, target: u32) -> Result<(), StopReason> {
         // Backward branch: count iterations per (method, target) so a hostile
         // infinite loop degrades quickly and predictably.
-        let Some(top) = self.frames.last() else { return Ok(()) };
+        let Some(top) = self.frames.last() else {
+            return Ok(());
+        };
         let key = (top.method.slot ^ top.method.class.rotate_left(13), target);
         let count = self.loop_counts.entry(key).or_insert(0);
         *count += 1;
-        let limit = self.policy.loop_unroll.max(self.budget.limits.max_loop_iterations);
+        let limit = self
+            .policy
+            .loop_unroll
+            .max(self.budget.limits.max_loop_iterations);
         if *count > limit {
             self.budget.stop(
                 StopReason::Budget,

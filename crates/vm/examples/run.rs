@@ -22,7 +22,9 @@ fn main() {
     }
 
     for arg in &args {
-        let Some(path) = arg.strip_prefix("--apk=") else { continue };
+        let Some(path) = arg.strip_prefix("--apk=") else {
+            continue;
+        };
         let bytes = std::fs::read(path).unwrap();
         let apk = unhusk_apk::Apk::from_bytes(bytes).unwrap();
         let t = Instant::now();
@@ -57,9 +59,16 @@ fn main() {
             );
         }
         println!("   methods entered: {}", a.machine.entered.len());
-        let mut names: Vec<String> = a.machine.entered.iter().map(|h| a.machine.program.method(*h).display()).collect();
+        let mut names: Vec<String> = a
+            .machine
+            .entered
+            .iter()
+            .map(|h| a.machine.program.method(*h).display())
+            .collect();
         names.sort();
-        for n in names { println!("     - {n}"); }
+        for n in names {
+            println!("     - {n}");
+        }
         println!("   requests: {}", a.machine.env.net.requests.len());
         for r in &a.machine.env.net.requests {
             println!(

@@ -33,7 +33,11 @@ pub struct Frame {
 }
 
 impl Frame {
-    pub fn new(method: MethodHandle, register_count: usize, call_site: Option<(MethodHandle, u32)>) -> Self {
+    pub fn new(
+        method: MethodHandle,
+        register_count: usize,
+        call_site: Option<(MethodHandle, u32)>,
+    ) -> Self {
         Self {
             method,
             regs: vec![Value::I(0); register_count.min(MAX_REGISTERS)],
@@ -133,6 +137,9 @@ pub struct Machine {
     pub native_libraries: Vec<(String, Vec<u8>)>,
     /// Libraries the sample explicitly loaded.
     pub loaded_libraries: Vec<String>,
+    /// Result of an instruction that writes to the following `move-result`
+    /// rather than to a register (filled-new-array).
+    pub pending_result: Option<Value>,
     /// Every method body entered at least once, so seeding never repeats work
     /// the sample already did itself.
     pub entered: std::collections::HashSet<MethodHandle>,

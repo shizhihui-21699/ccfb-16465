@@ -137,7 +137,10 @@ pub struct Provenance {
 
 impl Provenance {
     pub fn of(tag: Tag) -> Self {
-        Self { tags: vec![tag], note: None }
+        Self {
+            tags: vec![tag],
+            note: None,
+        }
     }
 
     pub fn constant() -> Self {

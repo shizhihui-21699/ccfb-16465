@@ -39,7 +39,10 @@ fn analyse(name: &str) -> Fixture {
         classes_in_recovered: Vec::new(),
     }
     .build();
-    Fixture { report, outcome: merged.outcome }
+    Fixture {
+        report,
+        outcome: merged.outcome,
+    }
 }
 
 #[test]
@@ -48,14 +51,22 @@ fn benign_app_reports_no_malice() {
     assert!(
         f.report.findings.is_empty(),
         "a plain app must produce no findings, got: {:?}",
-        f.report.findings.iter().map(|x| x.title.clone()).collect::<Vec<_>>()
+        f.report
+            .findings
+            .iter()
+            .map(|x| x.title.clone())
+            .collect::<Vec<_>>()
     );
 }
 
 #[test]
 fn packer_payload_is_recovered_and_executed() {
     let f = analyse("packer");
-    assert_eq!(f.report.recovered.len(), 1, "one DEX payload should be recovered");
+    assert_eq!(
+        f.report.recovered.len(),
+        1,
+        "one DEX payload should be recovered"
+    );
     let p = &f.report.recovered[0];
     assert_eq!(p.classes, 1);
     assert!(p.size > 0 && p.sha1.len() == 40);
@@ -63,7 +74,10 @@ fn packer_payload_is_recovered_and_executed() {
     let ran_recovered = f.outcome.trace.events.iter().any(|e| {
         e.kind == EventKind::MethodEnter && e.layer == unhusk_vm::events::Layer::RecoveredDex
     });
-    assert!(ran_recovered, "payload code must execute, not just be recovered");
+    assert!(
+        ran_recovered,
+        "payload code must execute, not just be recovered"
+    );
 
     let top = f.report.findings.first().expect("a finding");
     assert_eq!(top.severity, unhusk_report::Severity::Critical);
@@ -84,7 +98,10 @@ fn evasive_sample_reaches_beacon_only_after_gates_pass() {
 
     let rules: Vec<&str> = f.report.findings.iter().map(|x| x.rule).collect();
     assert!(rules.contains(&"root-artifact-probe"), "rules: {rules:?}");
-    assert!(rules.contains(&"emulator-artifact-probe"), "rules: {rules:?}");
+    assert!(
+        rules.contains(&"emulator-artifact-probe"),
+        "rules: {rules:?}"
+    );
 }
 
 #[test]

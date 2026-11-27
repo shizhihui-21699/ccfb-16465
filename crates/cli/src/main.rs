@@ -8,7 +8,6 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::time::Instant;
 use unhusk_engine::pipeline::{self, PipelineConfig};
 use unhusk_report::render::{render_text, to_json};
 use unhusk_report::{Report, ReportInput};
@@ -113,7 +112,16 @@ impl Threshold {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.cmd {
-        Cmd::Scan { apk, json, verbose, budget_secs, windows, no_compare, fail_on, extract } => {
+        Cmd::Scan {
+            apk,
+            json,
+            verbose,
+            budget_secs,
+            windows,
+            no_compare,
+            fail_on,
+            extract,
+        } => {
             let cfg = PipelineConfig {
                 total_budget_ms: budget_secs * 1000,
                 windows,
@@ -169,7 +177,10 @@ fn main() -> ExitCode {
                     Ok(a) => {
                         let f = pipeline::static_facts(&a);
                         if json {
-                            println!("{}", serde_json::to_string_pretty(&triage_json(&f)).unwrap_or_default());
+                            println!(
+                                "{}",
+                                serde_json::to_string_pretty(&triage_json(&f)).unwrap_or_default()
+                            );
                         } else {
                             print!("{}", triage_text(&f, path));
                         }
@@ -179,7 +190,14 @@ fn main() -> ExitCode {
             }
             ExitCode::SUCCESS
         }
-        Cmd::Batch { dir, budget_secs, json, out, min_severity, verbose } => {
+        Cmd::Batch {
+            dir,
+            budget_secs,
+            json,
+            out,
+            min_severity,
+            verbose,
+        } => {
             let paths: Vec<PathBuf> = walkdir::WalkDir::new(&dir)
                 .max_depth(4)
                 .into_iter()
@@ -208,17 +226,30 @@ fn main() -> ExitCode {
             for (path, r) in &results {
                 match r {
                     Ok(report) => {
-                        let sev = report.findings.first().map(|f| f.severity).unwrap_or(unhusk_report::Severity::Info);
+                        let sev = report
+                            .findings
+                            .first()
+                            .map(|f| f.severity)
+                            .unwrap_or(unhusk_report::Severity::Info);
                         if sev >= min_severity.severity() {
                             flagged += 1;
                             if json {
                                 println!("{}", to_json(report));
                             } else {
-                                println!("{}  {}  {} finding(s)  {}", sev.tag(), report.facts.package, report.findings.len(), path.display());
+                                println!(
+                                    "{}  {}  {} finding(s)  {}",
+                                    sev.tag(),
+                                    report.facts.package,
+                                    report.findings.len(),
+                                    path.display()
+                                );
                             }
                         }
                         if let Some(d) = &out {
-                            let name = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "sample".into());
+                            let name = path
+                                .file_stem()
+                                .map(|s| s.to_string_lossy().to_string())
+                                .unwrap_or_else(|| "sample".into());
                             let _ = std::fs::write(d.join(format!("{name}.json")), to_json(report));
                         }
                     }
@@ -286,7 +317,9 @@ fn analyse_one(path: &Path, cfg: &PipelineConfig) -> Result<Report, BoxErr> {
     Ok(input.build())
 }
 
-fn collect_recovered_classes(recovered: &[unhusk_vm::interp::program::RecoveredDex]) -> Vec<String> {
+fn collect_recovered_classes(
+    recovered: &[unhusk_vm::interp::program::RecoveredDex],
+) -> Vec<String> {
     // Class names are recorded when the payload is registered; the summaries
     // carry counts, and the graph carries the executed names.
     let _ = recovered;
@@ -308,7 +341,13 @@ fn extract_payloads(path: &Path, cfg: &PipelineConfig, dir: &Path) -> Result<(),
     for (name, bytes) in a.machine.recovered_payloads.iter() {
         let safe: String = name
             .chars()
-            .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' })
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect();
         std::fs::write(dir.join(format!("{safe}.dex")), bytes)?;
         println!("extracted {} -> {}/{}.dex", name, dir.display(), safe);
@@ -348,7 +387,10 @@ fn triage_json(f: &unhusk_report::StaticFacts) -> serde_json::Value {
 fn triage_text(f: &unhusk_report::StaticFacts, path: &Path) -> String {
     let mut o = String::new();
     o.push_str(&format!("{} ({})\n", path.display(), f.apk_sha256));
-    o.push_str(&format!("  package {}  version {}\n", f.package, f.version_name));
+    o.push_str(&format!(
+        "  package {}  version {}\n",
+        f.package, f.version_name
+    ));
     o.push_str(&format!(
         "  minSdk {}  targetSdk {}  debuggable {}\n",
         f.min_sdk.map(|v| v.to_string()).unwrap_or_default(),
@@ -358,7 +400,10 @@ fn triage_text(f: &unhusk_report::StaticFacts, path: &Path) -> String {
     o.push_str(&format!("  dex: {}\n", f.dex_files.join(", ")));
     o.push_str(&format!("  permissions: {}\n", f.permissions.join(", ")));
     if !f.exported_components.is_empty() {
-        o.push_str(&format!("  exported: {}\n", f.exported_components.join(", ")));
+        o.push_str(&format!(
+            "  exported: {}\n",
+            f.exported_components.join(", ")
+        ));
     }
     if !f.packer_hits.is_empty() {
         o.push_str("  packer fingerprints:\n");

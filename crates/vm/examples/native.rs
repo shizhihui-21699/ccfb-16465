@@ -38,7 +38,10 @@ fn main() {
 
     let out = m.run(m.mem_base + code.vaddr, &NativeLimits::default());
     println!("outcome: {out:?}");
-    let restored = m.read_mem(BUF, plain.len()).map(|b| b.to_vec()).unwrap_or_default();
+    let restored = m
+        .read_mem(BUF, plain.len())
+        .map(|b| b.to_vec())
+        .unwrap_or_default();
     println!("decrypted: {:?}", String::from_utf8_lossy(&restored));
     println!("matches  : {}", restored == plain);
 }

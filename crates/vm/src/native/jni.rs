@@ -58,14 +58,17 @@ pub fn dispatch(m: &mut Machine, name: &str) -> Result<(), String> {
             if n > 4 * 1024 * 1024 {
                 return Err(format!("memcpy of {n} bytes refused (cap 4 MiB)"));
             }
-            let data = m.read_mem(src, n).ok_or_else(|| "memcpy source out of range".to_string())?.to_vec();
+            let data = m
+                .read_mem(src, n)
+                .ok_or_else(|| "memcpy source out of range".to_string())?
+                .to_vec();
             let off = dst.wrapping_sub(m.mem_base) as usize;
             if off + n > m.mem.len() {
                 return Err("memcpy destination out of range".into());
             }
             m.mem[off..off + n].copy_from_slice(&data);
-            for i in 0..n {
-                m.writes.insert(dst + i as u64, data[i]);
+            for (i, b) in data.iter().enumerate() {
+                m.writes.insert(dst + i as u64, *b);
             }
             m.regs[0] = dst;
             Ok(())
@@ -87,7 +90,7 @@ pub fn dispatch(m: &mut Machine, name: &str) -> Result<(), String> {
         }
         "malloc" | "calloc" => {
             // Bump allocator in the upper half of the emulated memory.
-            let n = m.regs[0].max(1) as u64;
+            let n = m.regs[0].max(1);
             if n > 64 * 1024 * 1024 {
                 return Err(format!("allocation of {n} bytes refused"));
             }
@@ -121,7 +124,11 @@ pub fn dispatch(m: &mut Machine, name: &str) -> Result<(), String> {
         "__stack_chk_fail" => Err("__stack_chk_fail called (stack canary tripped)".into()),
         _ => {
             // JNI-style: leave arguments intact, return a plausible handle.
-            m.regs[0] = if m.regs[0] == 0 { 0x7000_0000 } else { m.regs[0] };
+            m.regs[0] = if m.regs[0] == 0 {
+                0x7000_0000
+            } else {
+                m.regs[0]
+            };
             Ok(())
         }
     }

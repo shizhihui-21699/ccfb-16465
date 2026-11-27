@@ -115,7 +115,12 @@ pub const DEFAULT_TRACE_CAP: usize = 200_000;
 
 impl Trace {
     pub fn new(cap: usize) -> Self {
-        Self { events: Vec::new(), cap, dropped: 0, seq: 0 }
+        Self {
+            events: Vec::new(),
+            cap,
+            dropped: 0,
+            seq: 0,
+        }
     }
 
     pub fn push(&mut self, mut ev: Event) -> u64 {

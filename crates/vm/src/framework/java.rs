@@ -3,7 +3,7 @@
 //! unpacking loop actually lives, because the DEX decryptor typically calls
 //! `MessageDigest`, `Cipher`, `String.getBytes` and `ClassLoader.loadClass`.
 
-use super::{heap_bytes, obs, CallResult, Level, Observation};
+use super::{obs, CallResult, Level, Observation};
 use crate::crypto as k;
 use crate::heap::{Object, ObjectValue};
 use crate::interp::state::Machine;
@@ -21,9 +21,10 @@ impl Machine {
             "java/lang/Object" => self.java_object(name, args),
             "java/lang/Class" => self.java_class(name, args),
             "java/lang/ClassLoader" => self.java_class_loader(name, args),
-            "dalvik/system/DexClassLoader" | "dalvik/system/PathClassLoader" | "dalvik/system/InMemoryDexClassLoader" | "dalvik/system/BaseDexClassLoader" => {
-                self.dalvik_loader(class, name, args)
-            }
+            "dalvik/system/DexClassLoader"
+            | "dalvik/system/PathClassLoader"
+            | "dalvik/system/InMemoryDexClassLoader"
+            | "dalvik/system/BaseDexClassLoader" => self.dalvik_loader(class, name, args),
             "dalvik/system/DexFile" => self.dalvik_dex_file(name, args),
             "java/lang/reflect/Method" => self.java_reflect_method(name, args),
             "java/lang/reflect/Field" => CallResult::void(),
@@ -41,29 +42,47 @@ impl Machine {
             | "java/io/PrintStream"
             | "java/io/DataInputStream"
             | "java/io/DataOutputStream" => self.java_io(class, name, args),
-            "java/io/ByteArrayOutputStream" | "java/io/ByteArrayInputStream" => self.java_byte_stream(class, name, args),
-            "java/io/BufferedInputStream" | "java/io/BufferedOutputStream" => CallResult::void(),
-            "java/lang/Integer" | "java/lang/Long" | "java/lang/Short" | "java/lang/Byte" | "java/lang/Character" | "java/lang/Boolean" | "java/lang/Float" | "java/lang/Double" => {
-                self.java_boxed(class, name, args)
+            "java/io/ByteArrayOutputStream" | "java/io/ByteArrayInputStream" => {
+                self.java_byte_stream(class, name, args)
             }
+            "java/io/BufferedInputStream" | "java/io/BufferedOutputStream" => CallResult::void(),
+            "java/lang/Integer"
+            | "java/lang/Long"
+            | "java/lang/Short"
+            | "java/lang/Byte"
+            | "java/lang/Character"
+            | "java/lang/Boolean"
+            | "java/lang/Float"
+            | "java/lang/Double" => self.java_boxed(class, name, args),
             "java/lang/Math" => self.java_math(name, args),
             "java/util/Arrays" => self.java_arrays(name, args),
             "java/util/Base64" | "android/util/Base64" => self.java_base64(name, args),
             "java/lang/Thread" => self.java_thread(name, args),
-            "java/lang/System" => CallResult::void(),
-            "java/lang/Throwable" | "java/lang/Exception" | "java/lang/RuntimeException" => CallResult::void(),
+            "java/lang/Throwable" | "java/lang/Exception" | "java/lang/RuntimeException" => {
+                CallResult::void()
+            }
             "java/security/MessageDigest" => self.java_message_digest(name, args),
             "javax/crypto/Cipher" => self.javax_cipher(name, args),
-            "javax/crypto/spec/SecretKeySpec" | "javax/crypto/spec/IvParameterSpec" | "javax/crypto/spec/PBEKeySpec" => {
-                self.javax_key_spec(class, name, args)
+            "javax/crypto/spec/SecretKeySpec"
+            | "javax/crypto/spec/IvParameterSpec"
+            | "javax/crypto/spec/PBEKeySpec" => self.javax_key_spec(class, name, args),
+            "java/nio/charset/Charset"
+            | "java/nio/charset/CharsetEncoder"
+            | "java/nio/ByteBuffer" => self.java_nio(class, name, args),
+            "java/util/Random" | "java/security/SecureRandom" => {
+                self.java_random(class, name, args)
             }
-            "java/nio/charset/Charset" | "java/nio/charset/CharsetEncoder" | "java/nio/ByteBuffer" => self.java_nio(class, name, args),
-            "java/util/Random" | "java/security/SecureRandom" => self.java_random(class, name, args),
-            "java/lang/ThreadLocal" | "java/lang/Iterable" | "java/util/Iterator" => CallResult::void(),
+            "java/lang/ThreadLocal" | "java/lang/Iterable" | "java/util/Iterator" => {
+                CallResult::void()
+            }
             "java/lang/Enum" => CallResult::void(),
-            "java/util/HashMap" | "java/util/HashSet" | "java/util/ArrayList" | "java/util/Map" | "java/util/List" | "java/util/LinkedList" | "java/util/TreeMap" => {
-                self.java_collections(class, name, args)
-            }
+            "java/util/HashMap"
+            | "java/util/HashSet"
+            | "java/util/ArrayList"
+            | "java/util/Map"
+            | "java/util/List"
+            | "java/util/LinkedList"
+            | "java/util/TreeMap" => self.java_collections(class, name, args),
             "org/json/JSONObject" => self.java_json(class, name, args),
             // HTTP clients live with the network model, not the JDK table.
             "java/net/URL"
@@ -127,7 +146,9 @@ impl Machine {
             "hashCode" => {
                 // Java's String.hashCode, which samples use for key derivation.
                 let s = self.arg_str_or(args, 0);
-                let h = s.encode_utf16().fold(0i32, |acc, u| acc.wrapping_mul(31).wrapping_add(u as i32));
+                let h = s
+                    .encode_utf16()
+                    .fold(0i32, |acc, u| acc.wrapping_mul(31).wrapping_add(u as i32));
                 CallResult::int(h)
             }
             "toString" => CallResult::new(args.first().copied(), None),
@@ -184,7 +205,13 @@ impl Machine {
                         let f = self.arg_i32(args, 1);
                         let t = self.arg_i32(args, 2);
                         s.chars()
-                            .map(|c| if c as i32 == f { char::from_u32(t as u32).unwrap_or(c) } else { c })
+                            .map(|c| {
+                                if c as i32 == f {
+                                    char::from_u32(t as u32).unwrap_or(c)
+                                } else {
+                                    c
+                                }
+                            })
                             .collect()
                     }
                 };
@@ -195,7 +222,11 @@ impl Machine {
             "startsWith" => {
                 let s = self.arg_str_or(args, 0);
                 let p = self.arg_str_or(args, 1);
-                let off = if args.len() > 2 { self.arg_i32(args, 2).max(0) as usize } else { 0 };
+                let off = if args.len() > 2 {
+                    self.arg_i32(args, 2).max(0) as usize
+                } else {
+                    0
+                };
                 let tail: String = s.chars().skip(off).collect();
                 CallResult::int(tail.starts_with(&p) as i32)
             }
@@ -213,7 +244,11 @@ impl Machine {
                 let s = self.arg_str_or(args, 0);
                 match self.arg_str(args, 1) {
                     Some(p) => {
-                        let from = if args.len() > 2 { self.arg_i32(args, 2).max(0) as usize } else { 0 };
+                        let from = if args.len() > 2 {
+                            self.arg_i32(args, 2).max(0) as usize
+                        } else {
+                            0
+                        };
                         let tail: String = s.chars().skip(from).collect();
                         let byte_off: usize = s.chars().take(from).map(|c| c.len_utf8()).sum();
                         CallResult::int(tail.find(&p).map(|i| (i + byte_off) as i32).unwrap_or(-1))
@@ -229,14 +264,24 @@ impl Machine {
                 let s = self.arg_str_or(args, 0);
                 let sep = self.arg_str_or(args, 1);
                 let parts: Vec<Value> = if sep.is_empty() {
-                    s.chars().map(|c| self.new_string(c.to_string(), Provenance::constant())).collect()
+                    s.chars()
+                        .map(|c| self.new_string(c.to_string(), Provenance::constant()))
+                        .collect()
                 } else {
-                    s.split(&sep[..]).map(|p| self.new_string(p.to_string(), Provenance::constant())).collect()
+                    s.split(&sep[..])
+                        .map(|p| self.new_string(p.to_string(), Provenance::constant()))
+                        .collect()
                 };
-                CallResult::obj(match self.heap.new_obj_array("[Ljava/lang/String;", parts, Provenance::constant()) {
-                    Some(id) => Value::obj(id),
-                    None => Value::NULL,
-                })
+                CallResult::obj(
+                    match self.heap.new_obj_array(
+                        "[Ljava/lang/String;",
+                        parts,
+                        Provenance::constant(),
+                    ) {
+                        Some(id) => Value::obj(id),
+                        None => Value::NULL,
+                    },
+                )
             }
             "concat" => {
                 let mut out = self.arg_str_or(args, 0);
@@ -265,7 +310,10 @@ impl Machine {
                 // Reuse the heap object as a builder.
                 if let Some(obj) = self.heap.get_mut(this) {
                     if matches!(obj, Object::Instance { .. }) {
-                        *obj = Object::Builder { buf: String::new(), prov: Provenance::default() };
+                        *obj = Object::Builder {
+                            buf: String::new(),
+                            prov: Provenance::default(),
+                        };
                     }
                 }
                 if let Some(s) = self.arg_str(args, 1) {
@@ -276,13 +324,17 @@ impl Machine {
                 CallResult::void()
             }
             "append" => {
-                let Some(this) = self.arg_obj(args, 0) else { return CallResult::void() };
+                let Some(this) = self.arg_obj(args, 0) else {
+                    return CallResult::void();
+                };
                 let text = match args.get(1) {
                     Some(Value::Obj(0)) => "null".to_string(),
                     Some(Value::Obj(id)) => match self.heap.get(*id) {
                         Some(Object::Str { value, .. }) => value.clone(),
                         Some(Object::Builder { buf, .. }) => buf.clone(),
-                        Some(Object::Array { bytes, .. }) => String::from_utf8_lossy(bytes).into_owned(),
+                        Some(Object::Array { bytes, .. }) => {
+                            String::from_utf8_lossy(bytes).into_owned()
+                        }
                         _ => self.render_value(args[1]),
                     },
                     Some(v) => self.render_value(*v),
@@ -297,7 +349,9 @@ impl Machine {
                 CallResult::new(Some(Value::obj(this)), None)
             }
             "toString" => {
-                let Some(this) = self.arg_obj(args, 0) else { return CallResult::void() };
+                let Some(this) = self.arg_obj(args, 0) else {
+                    return CallResult::void();
+                };
                 let s = match self.heap.get(this) {
                     Some(Object::Builder { buf, .. }) => buf.clone(),
                     _ => String::new(),
@@ -309,20 +363,28 @@ impl Machine {
                 CallResult::obj(self.new_string(s, prov))
             }
             "length" => {
-                let Some(this) = self.arg_obj(args, 0) else { return CallResult::int(0) };
+                let Some(this) = self.arg_obj(args, 0) else {
+                    return CallResult::int(0);
+                };
                 match self.heap.get(this) {
-                    Some(Object::Builder { buf, .. }) => CallResult::int(buf.chars().count() as i32),
+                    Some(Object::Builder { buf, .. }) => {
+                        CallResult::int(buf.chars().count() as i32)
+                    }
                     _ => CallResult::int(0),
                 }
             }
             "reverse" => {
-                let Some(this) = self.arg_obj(args, 0) else { return CallResult::void() };
+                let Some(this) = self.arg_obj(args, 0) else {
+                    return CallResult::void();
+                };
                 if let Some(Object::Builder { buf, .. }) = self.heap.get_mut(this) {
                     *buf = buf.chars().rev().collect();
                 }
                 CallResult::new(Some(Value::obj(this)), None)
             }
-            "setLength" | "delete" | "insert" | "replace" => CallResult::new(Some(args.first().copied().unwrap_or(Value::NULL)), None),
+            "setLength" | "delete" | "insert" | "replace" => {
+                CallResult::new(Some(args.first().copied().unwrap_or(Value::NULL)), None)
+            }
             _ => CallResult::void(),
         }
     }
@@ -331,11 +393,17 @@ impl Machine {
         match name {
             "toString" => {
                 let s = self.arg_obj(args, 0).and_then(|id| {
-                    self.heap.get(id).and_then(|o| o.as_str()).map(|s| s.to_string())
+                    self.heap
+                        .get(id)
+                        .and_then(|o| o.as_str())
+                        .map(|s| s.to_string())
                 });
                 match s {
                     Some(s) => CallResult::obj(self.new_string(s, Provenance::default())),
-                    None => CallResult::obj(self.new_string(self.render_value(args.first().copied().unwrap_or(Value::NULL)), Provenance::default())),
+                    None => CallResult::obj(self.new_string(
+                        self.render_value(args.first().copied().unwrap_or(Value::NULL)),
+                        Provenance::default(),
+                    )),
                 }
             }
             "hashCode" => {
@@ -348,8 +416,14 @@ impl Machine {
                 CallResult::int((a == b) as i32)
             }
             "getClass" => {
-                let Some(id) = self.arg_obj(args, 0) else { return CallResult::obj(Value::NULL) };
-                let class = self.heap.get(id).map(|o| o.class_name().to_string()).unwrap_or_default();
+                let Some(id) = self.arg_obj(args, 0) else {
+                    return CallResult::obj(Value::NULL);
+                };
+                let class = self
+                    .heap
+                    .get(id)
+                    .map(|o| o.class_name().to_string())
+                    .unwrap_or_default();
                 match self.heap.alloc(Object::Class { descriptor: class }) {
                     Some(id) => CallResult::obj(Value::obj(id)),
                     None => CallResult::obj(Value::NULL),
@@ -362,7 +436,9 @@ impl Machine {
     fn java_class(&mut self, name: &str, args: &[Value]) -> CallResult {
         match name {
             "getName" | "getCanonicalName" => {
-                let Some(id) = self.arg_obj(args, 0) else { return CallResult::obj(Value::NULL) };
+                let Some(id) = self.arg_obj(args, 0) else {
+                    return CallResult::obj(Value::NULL);
+                };
                 let desc = match self.heap.get(id) {
                     Some(Object::Class { descriptor }) => descriptor.clone(),
                     _ => String::new(),
@@ -371,7 +447,9 @@ impl Machine {
                 CallResult::obj(self.new_string(dotted, Provenance::constant()))
             }
             "getSimpleName" => {
-                let Some(id) = self.arg_obj(args, 0) else { return CallResult::obj(Value::NULL) };
+                let Some(id) = self.arg_obj(args, 0) else {
+                    return CallResult::obj(Value::NULL);
+                };
                 let desc = match self.heap.get(id) {
                     Some(Object::Class { descriptor }) => descriptor.clone(),
                     _ => String::new(),
@@ -386,7 +464,9 @@ impl Machine {
             "forName" => {
                 let n = self.arg_str_or(args, 0);
                 let desc = format!("L{};", n.replace('.', "/"));
-                match self.heap.alloc(Object::Class { descriptor: desc.clone() }) {
+                match self.heap.alloc(Object::Class {
+                    descriptor: desc.clone(),
+                }) {
                     Some(id) => {
                         let mut o = obs(Level::Notable, "reflect", format!("Class.forName({n})"));
                         o.prov = Some(Provenance::of(Tag::Constant));
@@ -395,12 +475,16 @@ impl Machine {
                     None => CallResult::obj(Value::NULL),
                 }
             }
-            "getDeclaredMethods" | "getMethods" | "getDeclaredFields" | "getInterfaces" | "getAnnotations" => {
-                CallResult::obj(match self.heap.new_obj_array("[Ljava/lang/Object;", vec![], Provenance::default()) {
+            "getDeclaredMethods" | "getMethods" | "getDeclaredFields" | "getInterfaces"
+            | "getAnnotations" => CallResult::obj(
+                match self
+                    .heap
+                    .new_obj_array("[Ljava/lang/Object;", vec![], Provenance::default())
+                {
                     Some(id) => Value::obj(id),
                     None => Value::NULL,
-                })
-            }
+                },
+            ),
             "getMethod" | "getDeclaredMethod" => {
                 // Return a Method model object carrying class/name/params.
                 let target = self.arg_obj(args, 0);
@@ -431,14 +515,23 @@ impl Machine {
                     }
                     v => v,
                 };
-                CallResult::new(Some(m), Some(obs(Level::Notable, "reflect", format!("getDeclaredField({fname})"))))
+                CallResult::new(
+                    Some(m),
+                    Some(obs(
+                        Level::Notable,
+                        "reflect",
+                        format!("getDeclaredField({fname})"),
+                    )),
+                )
             }
             "getClassLoader" => CallResult::obj(self.new_model_default("Ljava/lang/ClassLoader;")),
             "newInstance" => {
-                let class_desc = self.arg_obj(args, 0).and_then(|id| match self.heap.get(id) {
-                    Some(Object::Class { descriptor }) => Some(descriptor.clone()),
-                    _ => None,
-                });
+                let class_desc = self
+                    .arg_obj(args, 0)
+                    .and_then(|id| match self.heap.get(id) {
+                        Some(Object::Class { descriptor }) => Some(descriptor.clone()),
+                        _ => None,
+                    });
                 match class_desc {
                     Some(desc) => self.instantiate_and_init(&desc, &[]),
                     None => CallResult::obj(Value::NULL),
@@ -479,7 +572,10 @@ impl Machine {
     fn java_class_loader(&mut self, name: &str, args: &[Value]) -> CallResult {
         match name {
             "loadClass" => {
-                let n = self.arg_str(args, 1).or_else(|| self.arg_str(args, 0)).unwrap_or_default();
+                let n = self
+                    .arg_str(args, 1)
+                    .or_else(|| self.arg_str(args, 0))
+                    .unwrap_or_default();
                 let desc = format!("L{};", n.replace('.', "/"));
                 // If the class lives in a DEX we already recovered, initialise
                 // and run it now: that is the packer's "now execute" moment.
@@ -525,7 +621,10 @@ impl Machine {
             }
             "loadClass" => {
                 // PathClassLoader.loadClass(name) is the common "now run it" call.
-                let n = self.arg_str(args, 1).or_else(|| self.arg_str(args, 0)).unwrap_or_default();
+                let n = self
+                    .arg_str(args, 1)
+                    .or_else(|| self.arg_str(args, 0))
+                    .unwrap_or_default();
                 self.note_class_load(&n);
                 let desc = format!("L{};", n.replace('.', "/"));
                 match self.heap.alloc(Object::Class { descriptor: desc }) {
@@ -561,7 +660,9 @@ impl Machine {
             "setAccessible" => CallResult::void(),
             "invoke" => {
                 // Reflectively call a method on a target object.
-                let Some(method_id) = self.arg_obj(args, 0) else { return CallResult::obj(Value::NULL) };
+                let Some(method_id) = self.arg_obj(args, 0) else {
+                    return CallResult::obj(Value::NULL);
+                };
                 let target = args.get(1).copied().unwrap_or(Value::NULL);
                 let mname = self.model_string(method_id, "name").unwrap_or_default();
                 let class = self.model_string(method_id, "class").unwrap_or_default();
@@ -571,12 +672,21 @@ impl Machine {
                         call_args.extend(items.iter().copied());
                     }
                 }
-                let o = obs(Level::Notable, "reflect", format!("Method.invoke({class}.{mname})"));
+                let o = obs(
+                    Level::Notable,
+                    "reflect",
+                    format!("Method.invoke({class}.{mname})"),
+                );
                 // Dispatch into sample code when we can resolve it.
                 if let Some(handle) = self.program.methods_named(&class, &mname).first().copied() {
                     if self.program.method(handle).code.is_some() {
                         let result_reg = self.next_move_result_reg_pub();
-                        let _ = self.push_frame(handle, call_args, None, result_reg.map(|r| (r, false, true)));
+                        let _ = self.push_frame(
+                            handle,
+                            call_args,
+                            None,
+                            result_reg.map(|r| (r, false, true)),
+                        );
                         return CallResult::new(None, Some(o));
                     }
                 }
@@ -590,7 +700,7 @@ impl Machine {
         let frame = self.frames.last()?;
         let code = self.program.method(frame.method).code.as_ref()?;
         let next = code.instructions.get(frame.ip)?;
-        if matches!(next.op, 0x0a | 0x0b | 0x0c) {
+        if matches!(next.op, 0x0a..=0x0c) {
             Some(next.a)
         } else {
             None
@@ -635,10 +745,14 @@ impl Machine {
                 let dst_pos = self.arg_i32(args, 3).max(0) as usize;
                 let len = self.arg_i32(args, 4).max(0) as usize;
                 let data = match self.heap.get(src) {
-                    Some(Object::Array { bytes, .. }) => bytes.get(src_pos..src_pos + len).map(|s| s.to_vec()),
+                    Some(Object::Array { bytes, .. }) => {
+                        bytes.get(src_pos..src_pos + len).map(|s| s.to_vec())
+                    }
                     _ => None,
                 };
-                if let (Some(data), Some(Object::Array { bytes, prov, .. })) = (data, self.heap.get_mut(dst)) {
+                if let (Some(data), Some(Object::Array { bytes, prov, .. })) =
+                    (data, self.heap.get_mut(dst))
+                {
                     if dst_pos + len <= bytes.len() {
                         bytes[dst_pos..dst_pos + len].copy_from_slice(&data);
                         prov.add(Tag::Built);
@@ -652,18 +766,29 @@ impl Machine {
 
     fn java_runtime(&mut self, name: &str, args: &[Value]) -> CallResult {
         match name {
-            "getRuntime" => CallResult::new(Some(self.new_model_default("Ljava/lang/Runtime;")), Some(obs(Level::Notable, "exec", "Runtime.getRuntime()"))),
+            "getRuntime" => CallResult::new(
+                Some(self.new_model_default("Ljava/lang/Runtime;")),
+                Some(obs(Level::Notable, "exec", "Runtime.getRuntime()")),
+            ),
             "exec" => {
                 // exec(String) or exec(String[])
-                let cmd = self.arg_str(args, 1).or_else(|| {
-                    self.arg_bytes(args, 1).map(|b| String::from_utf8_lossy(&b).into_owned())
-                }).unwrap_or_default();
-                if cmd.is_empty() { return CallResult::void(); }
+                let cmd = self
+                    .arg_str(args, 1)
+                    .or_else(|| {
+                        self.arg_bytes(args, 1)
+                            .map(|b| String::from_utf8_lossy(&b).into_owned())
+                    })
+                    .unwrap_or_default();
+                if cmd.is_empty() {
+                    return CallResult::void();
+                }
                 let o = self.run_shell(&cmd);
                 CallResult::new(Some(self.new_model_default("Ljava/lang/Process;")), Some(o))
             }
             "availableProcessors" => CallResult::int(8),
-            "maxMemory" | "totalMemory" | "freeMemory" => CallResult::new(Some(Value::J(268_435_456)), None),
+            "maxMemory" | "totalMemory" | "freeMemory" => {
+                CallResult::new(Some(Value::J(268_435_456)), None)
+            }
             "loadLibrary" | "load" => {
                 let n = self.arg_str_or(args, 1);
                 if !n.is_empty() {
@@ -671,7 +796,11 @@ impl Machine {
                 }
                 CallResult::new(
                     None,
-                    Some(obs(Level::Critical, "load", format!("Runtime.loadLibrary({n})"))),
+                    Some(obs(
+                        Level::Critical,
+                        "load",
+                        format!("Runtime.loadLibrary({n})"),
+                    )),
                 )
             }
             "addShutdownHook" | "exit" | "halt" => CallResult::void(),
@@ -684,7 +813,10 @@ impl Machine {
             "<init>" => CallResult::void(),
             "start" => {
                 let cmd = self.arg_str_or(args, 0);
-                CallResult::new(Some(self.new_model_default("Ljava/lang/Process;")), Some(self.run_shell(&cmd)))
+                CallResult::new(
+                    Some(self.new_model_default("Ljava/lang/Process;")),
+                    Some(self.run_shell(&cmd)),
+                )
             }
             _ => CallResult::void(),
         }
@@ -699,7 +831,9 @@ impl Machine {
         if let Some(rest) = trimmed.strip_prefix("getprop") {
             let key = rest.trim();
             output = match key {
-                "ro.product.model" | "ro.product.device" | "ro.product.name" => self.env.profile.model.clone(),
+                "ro.product.model" | "ro.product.device" | "ro.product.name" => {
+                    self.env.profile.model.clone()
+                }
                 "ro.build.version.sdk" => self.env.sdk_int.to_string(),
                 "ro.product.manufacturer" => self.env.profile.manufacturer.clone(),
                 "ro.kernel.qemu" | "ro.boot.qemu" => "0".to_string(),
@@ -719,7 +853,10 @@ impl Machine {
             } else if path == "/proc/cpuinfo" {
                 output = self.env.profile.cpuinfo.clone();
             } else if path == "/proc/version" {
-                output = format!("Linux version 5.10.107-android13 (build@{}) #1 SMP PREEMPT", self.env.profile.build_host);
+                output = format!(
+                    "Linux version 5.10.107-android13 (build@{}) #1 SMP PREEMPT",
+                    self.env.profile.build_host
+                );
             }
         } else if trimmed.starts_with("which ") || trimmed.starts_with("command -v ") {
             let name = trimmed.rsplit(' ').next().unwrap_or("");
@@ -741,7 +878,11 @@ impl Machine {
                 .collect::<Vec<_>>()
                 .join("\n");
         }
-        let mut o = obs(Level::Critical, "exec", format!("exec({trimmed:?}) -> {} bytes", output.len()));
+        let mut o = obs(
+            Level::Critical,
+            "exec",
+            format!("exec({trimmed:?}) -> {} bytes", output.len()),
+        );
         if !output.is_empty() {
             o.result = format!("exec({trimmed:?}) -> {:?}", truncate(&output, 120));
         }
@@ -765,8 +906,12 @@ impl Machine {
                     // buffer fields) can be attached to the same handle.
                     let descriptor = match class {
                         "java/io/File" => "Ljava/io/File;",
-                        "java/io/FileInputStream" | "java/io/FileReader" => "Ljava/io/FileInputStream;",
-                        "java/io/FileOutputStream" | "java/io/FileWriter" => "Ljava/io/FileOutputStream;",
+                        "java/io/FileInputStream" | "java/io/FileReader" => {
+                            "Ljava/io/FileInputStream;"
+                        }
+                        "java/io/FileOutputStream" | "java/io/FileWriter" => {
+                            "Ljava/io/FileOutputStream;"
+                        }
                         "java/io/PrintStream" => "Ljava/io/PrintStream;",
                         "java/io/RandomAccessFile" => "Ljava/io/RandomAccessFile;",
                         "java/io/OutputStream" => "Ljava/io/OutputStream;",
@@ -805,7 +950,14 @@ impl Machine {
             "delete" => {
                 let path = self.value_path(args.first()).unwrap_or_default();
                 let ok = self.env.fs.remove(&path);
-                CallResult::new(Some(Value::I(ok as i32)), Some(obs(Level::Notable, "file", format!("deleteFile({path}) = {ok}"))))
+                CallResult::new(
+                    Some(Value::I(ok as i32)),
+                    Some(obs(
+                        Level::Notable,
+                        "file",
+                        format!("deleteFile({path}) = {ok}"),
+                    )),
+                )
             }
             "length" => {
                 let path = self.value_path(args.first()).unwrap_or_default();
@@ -828,21 +980,33 @@ impl Machine {
                     .into_iter()
                     .map(|n| self.new_string(format!("{path}/{n}"), Provenance::default()))
                     .collect();
-                CallResult::obj(match self.heap.new_obj_array("[Ljava/lang/String;", items, Provenance::default()) {
-                    Some(id) => Value::obj(id),
-                    None => Value::NULL,
-                })
+                CallResult::obj(
+                    match self.heap.new_obj_array(
+                        "[Ljava/lang/String;",
+                        items,
+                        Provenance::default(),
+                    ) {
+                        Some(id) => Value::obj(id),
+                        None => Value::NULL,
+                    },
+                )
             }
             "mkdirs" | "mkdir" | "createNewFile" => {
                 let path = self.value_path(args.first()).unwrap_or_default();
-                CallResult::new(Some(Value::I(1)), Some(obs(Level::Routine, "file", format!("create({path})"))))
+                CallResult::new(
+                    Some(Value::I(1)),
+                    Some(obs(Level::Routine, "file", format!("create({path})"))),
+                )
             }
             "read" | "readBytes" => {
                 let path = self.value_path(args.first()).unwrap_or_default();
                 match self.env.fs.read(&path).map(|d| d.to_vec()) {
                     Some(data) => {
                         self.budget.charge_apk_read(data.len() as u64);
-                        CallResult::new(Some(self.new_bytes(data, Provenance::of(Tag::PackedData))), None)
+                        CallResult::new(
+                            Some(self.new_bytes(data, Provenance::of(Tag::PackedData))),
+                            None,
+                        )
                     }
                     None => CallResult::int(-1),
                 }
@@ -861,11 +1025,14 @@ impl Machine {
                 let prov = self.arg_prov(args, 1);
                 let cap = self.budget.limits.max_allocation_bytes;
                 if data.len() > cap {
-                    self.budget.stop(crate::limits::StopReason::Budget, "write too large");
+                    self.budget
+                        .stop(crate::limits::StopReason::Budget, "write too large");
                     return CallResult::void();
                 }
                 // 1. HTTP body: the stream remembers the connection it belongs to.
-                if let Some(conn) = this.and_then(|id| self.model_field(id, "conn").map(|v| v.as_i64() as u32)) {
+                if let Some(conn) =
+                    this.and_then(|id| self.model_field(id, "conn").map(|v| v.as_i64() as u32))
+                {
                     let url = self.model_string(conn, "url").unwrap_or_default();
                     let method = self
                         .model_string(conn, "method")
@@ -883,15 +1050,24 @@ impl Machine {
                     let mut o = obs(
                         Level::Critical,
                         "egress",
-                        format!("{method} {url} <- {n} bytes {:?}", crate::events::summarize_bytes(&data, 96)),
+                        format!(
+                            "{method} {url} <- {n} bytes {:?}",
+                            crate::events::summarize_bytes(&data, 96)
+                        ),
                     );
                     o.prov = Some(prov);
                     o.target = Some(url);
                     return CallResult::new(Some(Value::I(n as i32)), Some(o));
                 }
                 // 2. Byte-array stream: accumulate into its buffer.
-                if this.map(|id| self.model_field(id, "buf").is_some()).unwrap_or(false) {
-                    if let Some(Object::Model { fields, prov: p, .. }) = this.and_then(|id| self.heap.get_mut(id)) {
+                if this
+                    .map(|id| self.model_field(id, "buf").is_some())
+                    .unwrap_or(false)
+                {
+                    if let Some(Object::Model {
+                        fields, prov: p, ..
+                    }) = this.and_then(|id| self.heap.get_mut(id))
+                    {
                         if let Some(ObjectValue::Bytes(buf)) = fields.get_mut("buf") {
                             buf.extend_from_slice(&data);
                         }
@@ -901,14 +1077,20 @@ impl Machine {
                     return CallResult::int(data.len() as i32);
                 }
                 // 3. File stream.
-                let path = this.and_then(|id| self.model_string(id, "path")).unwrap_or_default();
+                let path = this
+                    .and_then(|id| self.model_string(id, "path"))
+                    .unwrap_or_default();
                 if path.is_empty() {
                     return CallResult::void();
                 }
                 self.env.fs.write(&path, data.clone());
                 let is_dex = k::looks_like_dex(&data);
                 let mut o = obs(
-                    if is_dex { Level::Critical } else { Level::Notable },
+                    if is_dex {
+                        Level::Critical
+                    } else {
+                        Level::Notable
+                    },
                     "file",
                     format!(
                         "writeFile({path}, {} bytes{})",
@@ -930,7 +1112,9 @@ impl Machine {
     }
 
     fn java_byte_stream(&mut self, class: &str, name: &str, args: &[Value]) -> CallResult {
-        let Some(this) = self.arg_obj(args, 0) else { return CallResult::void() };
+        let Some(this) = self.arg_obj(args, 0) else {
+            return CallResult::void();
+        };
         match name {
             "<init>" => {
                 if class.ends_with("ByteArrayOutputStream") {
@@ -941,7 +1125,10 @@ impl Machine {
             "write" => {
                 if let Some(data) = self.arg_bytes(args, 1) {
                     let prov = self.arg_prov(args, 1);
-                    if let Some(Object::Model { fields, prov: p, .. }) = self.heap.get_mut(this) {
+                    if let Some(Object::Model {
+                        fields, prov: p, ..
+                    }) = self.heap.get_mut(this)
+                    {
                         if let Some(ObjectValue::Bytes(buf)) = fields.get_mut("buf") {
                             buf.extend_from_slice(&data);
                         }
@@ -974,12 +1161,20 @@ impl Machine {
         }
     }
 
-    fn java_boxed(&mut self, class: &str, name: &str, args: &[Value]) -> CallResult {
+    fn java_boxed(&mut self, _class: &str, name: &str, args: &[Value]) -> CallResult {
         match name {
             "parseInt" | "parseLong" | "valueOf" | "parseShort" | "parseByte" | "decode" => {
                 let s = self.arg_str_or(args, args.len().saturating_sub(1));
-                let radix = if args.len() > 2 { self.arg_i32(args, 2) } else { 10 };
-                let v = i64::from_str_radix(s.trim().trim_start_matches("0x"), radix.max(2).min(36) as u32).unwrap_or(0);
+                let radix = if args.len() > 2 {
+                    self.arg_i32(args, 2)
+                } else {
+                    10
+                };
+                let v = i64::from_str_radix(
+                    s.trim().trim_start_matches("0x"),
+                    radix.clamp(2, 36) as u32,
+                )
+                .unwrap_or(0);
                 CallResult::new(Some(Value::I(v as i32)), None)
             }
             "toString" | "toHexString" | "toBinaryString" => {
@@ -991,8 +1186,12 @@ impl Machine {
                 };
                 CallResult::obj(self.new_string(s, Provenance::constant()))
             }
-            "intValue" | "longValue" | "byteValue" | "shortValue" => CallResult::new(Some(Value::I(self.arg_i32(args, 0))), None),
-            "doubleValue" | "floatValue" => CallResult::new(Some(Value::f32(self.arg_i32(args, 0) as f32)), None),
+            "intValue" | "longValue" | "byteValue" | "shortValue" => {
+                CallResult::new(Some(Value::I(self.arg_i32(args, 0))), None)
+            }
+            "doubleValue" | "floatValue" => {
+                CallResult::new(Some(Value::f32(self.arg_i32(args, 0) as f32)), None)
+            }
             "booleanValue" => CallResult::new(Some(Value::I(self.arg_i32(args, 0))), None),
             "MAX_VALUE" | "MIN_VALUE" => CallResult::int(i32::MAX),
             _ => CallResult::void(),
@@ -1035,11 +1234,16 @@ impl Machine {
     fn java_base64(&mut self, name: &str, args: &[Value]) -> CallResult {
         match name {
             "encode" | "encodeToString" => {
-                let data = self.arg_bytes(args, args.len().saturating_sub(1)).unwrap_or_default();
+                let data = self
+                    .arg_bytes(args, args.len().saturating_sub(1))
+                    .unwrap_or_default();
                 let s = k::base64_encode(&data);
                 let mut o = obs(Level::Routine, "decode", "Base64.encode");
                 o.prov = Some(self.derived_prov(args, Tag::Decoded));
-                CallResult::new(Some(self.new_string(s, Provenance::of(Tag::Built))), Some(o))
+                CallResult::new(
+                    Some(self.new_string(s, Provenance::of(Tag::Built))),
+                    Some(o),
+                )
             }
             "decode" => {
                 let s = self.arg_str_or(args, args.len().saturating_sub(1));
@@ -1048,9 +1252,17 @@ impl Machine {
                 prov.add(Tag::Built);
                 let decoded_dex = k::looks_like_dex(&bytes);
                 let mut o = obs(
-                    if decoded_dex { Level::Critical } else { Level::Notable },
+                    if decoded_dex {
+                        Level::Critical
+                    } else {
+                        Level::Notable
+                    },
                     "decode",
-                    format!("Base64.decode -> {} bytes{}", bytes.len(), if decoded_dex { " (DEX)" } else { "" }),
+                    format!(
+                        "Base64.decode -> {} bytes{}",
+                        bytes.len(),
+                        if decoded_dex { " (DEX)" } else { "" }
+                    ),
                 );
                 o.prov = Some(prov.clone());
                 if decoded_dex {
@@ -1062,7 +1274,7 @@ impl Machine {
         }
     }
 
-    fn java_thread(&mut self, name: &str, args: &[Value]) -> CallResult {
+    fn java_thread(&mut self, name: &str, _args: &[Value]) -> CallResult {
         match name {
             "currentThread" => CallResult::obj(self.new_model_default("Ljava/lang/Thread;")),
             "getName" => CallResult::obj(self.new_string("main", Provenance::of(Tag::Device))),
@@ -1094,9 +1306,16 @@ impl Machine {
                     Some(h) => h.digest(&data),
                     None => Vec::new(),
                 };
-                let mut o = obs(Level::Notable, "crypto", format!("MessageDigest({alg}).digest -> {} bytes", out.len()));
+                let mut o = obs(
+                    Level::Notable,
+                    "crypto",
+                    format!("MessageDigest({alg}).digest -> {} bytes", out.len()),
+                );
                 o.prov = Some(self.derived_prov(args, Tag::Decoded));
-                CallResult::new(Some(self.new_bytes(out, Provenance::of(Tag::Decoded))), Some(o))
+                CallResult::new(
+                    Some(self.new_bytes(out, Provenance::of(Tag::Decoded))),
+                    Some(o),
+                )
             }
             "update" | "reset" => CallResult::void(),
             _ => CallResult::void(),
@@ -1117,15 +1336,21 @@ impl Machine {
                 CallResult::obj(v)
             }
             "init" => {
-                let Some(this) = self.arg_obj(args, 0) else { return CallResult::void() };
+                let Some(this) = self.arg_obj(args, 0) else {
+                    return CallResult::void();
+                };
                 let mode = self.arg_i32(args, 1);
                 // init(mode, key) or init(mode, key, iv)
-                let key_arg = self.arg_obj(args, 2).and_then(|k| self.model_field(k, "key").cloned());
+                let key_arg = self
+                    .arg_obj(args, 2)
+                    .and_then(|k| self.model_field(k, "key").cloned());
                 let key_bytes = match key_arg {
                     Some(ObjectValue::Bytes(b)) => b,
                     _ => self.arg_bytes(args, 3).unwrap_or_default(),
                 };
-                let iv_bytes = self.arg_obj(args, 3).and_then(|iv| self.model_field(iv, "iv").cloned());
+                let iv_bytes = self
+                    .arg_obj(args, 3)
+                    .and_then(|iv| self.model_field(iv, "iv").cloned());
                 let iv = match iv_bytes {
                     Some(ObjectValue::Bytes(b)) => b,
                     _ => self.arg_bytes(args, 4).unwrap_or_default(),
@@ -1136,17 +1361,28 @@ impl Machine {
                 CallResult::void()
             }
             "doFinal" => {
-                let Some(this) = self.arg_obj(args, 0) else { return CallResult::void() };
+                let Some(this) = self.arg_obj(args, 0) else {
+                    return CallResult::void();
+                };
                 let alg = self.model_string(this, "alg").unwrap_or_default();
-                let mode = self.model_field(this, "mode").map(|v| v.as_i64() as i32).unwrap_or(2);
-                let key = self.model_field(this, "key").and_then(|v| match v {
-                    ObjectValue::Bytes(b) => Some(b.clone()),
-                    _ => None,
-                }).unwrap_or_default();
-                let iv = self.model_field(this, "iv").and_then(|v| match v {
-                    ObjectValue::Bytes(b) => Some(b.clone()),
-                    _ => None,
-                }).unwrap_or_default();
+                let mode = self
+                    .model_field(this, "mode")
+                    .map(|v| v.as_i64() as i32)
+                    .unwrap_or(2);
+                let key = self
+                    .model_field(this, "key")
+                    .and_then(|v| match v {
+                        ObjectValue::Bytes(b) => Some(b.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                let iv = self
+                    .model_field(this, "iv")
+                    .and_then(|v| match v {
+                        ObjectValue::Bytes(b) => Some(b.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
                 let data = self.arg_bytes(args, 1).unwrap_or_default();
                 let out = apply_cipher(&alg, mode, &key, &iv, &data);
                 let decoded = out.1;
@@ -1157,13 +1393,23 @@ impl Machine {
                 let mut prov = self.derived_prov(args, Tag::Decoded);
                 prov.add(Tag::Built);
                 let mut o = obs(
-                    if is_dex { Level::Critical } else if notable { Level::Notable } else { Level::Routine },
+                    if is_dex {
+                        Level::Critical
+                    } else if notable {
+                        Level::Notable
+                    } else {
+                        Level::Routine
+                    },
                     "crypto",
                     format!(
                         "Cipher({alg}, mode={mode}).doFinal -> {} bytes{}{}",
                         bytes.len(),
                         if is_dex { " (DEX!)" } else { "" },
-                        if decoded { "" } else { " [primitives unsupported]" }
+                        if decoded {
+                            ""
+                        } else {
+                            " [primitives unsupported]"
+                        }
                     ),
                 );
                 o.prov = Some(prov.clone());
@@ -1181,9 +1427,16 @@ impl Machine {
             return CallResult::void();
         }
         let this = self.arg_obj(args, 0);
-        let data = self.arg_bytes(args, 1).or_else(|| self.arg_bytes(args, 0)).unwrap_or_default();
+        let data = self
+            .arg_bytes(args, 1)
+            .or_else(|| self.arg_bytes(args, 0))
+            .unwrap_or_default();
         if let Some(this) = this {
-            let key = if class.ends_with("IvParameterSpec") { "iv" } else { "key" };
+            let key = if class.ends_with("IvParameterSpec") {
+                "iv"
+            } else {
+                "key"
+            };
             self.set_model_field(this, key, ObjectValue::Bytes(data));
         }
         CallResult::void()
@@ -1195,7 +1448,9 @@ impl Machine {
                 let n = self.arg_str_or(args, 0);
                 CallResult::obj(self.new_string(n, Provenance::constant()))
             }
-            ("java/nio/charset/Charset", "defaultCharset") => CallResult::obj(self.new_string("UTF-8", Provenance::constant())),
+            ("java/nio/charset/Charset", "defaultCharset") => {
+                CallResult::obj(self.new_string("UTF-8", Provenance::constant()))
+            }
             ("java/nio/ByteBuffer", "wrap") => {
                 let data = self.arg_bytes(args, 0).unwrap_or_default();
                 let v = match self.new_model_default("Ljava/nio/ByteBuffer;") {
@@ -1208,38 +1463,56 @@ impl Machine {
                 CallResult::obj(v)
             }
             ("java/nio/ByteBuffer", "array") => {
-                let data = self.arg_obj(args, 0).and_then(|id| match self.model_field(id, "buf") {
-                    Some(ObjectValue::Bytes(b)) => Some(b.clone()),
-                    _ => None,
-                }).unwrap_or_default();
+                let data = self
+                    .arg_obj(args, 0)
+                    .and_then(|id| match self.model_field(id, "buf") {
+                        Some(ObjectValue::Bytes(b)) => Some(b.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
                 CallResult::obj(self.new_bytes(data, Provenance::default()))
             }
             _ => CallResult::void(),
         }
     }
 
-    fn java_random(&mut self, class: &str, name: &str, args: &[Value]) -> CallResult {
+    fn java_random(&mut self, _class: &str, name: &str, args: &[Value]) -> CallResult {
         match name {
             "<init>" => {
                 if let Some(this) = self.arg_obj(args, 0) {
-                    let seed = self.arg_i64(args, 1).wrapping_add(0x9E3779B97F4A7C15u64 as i64) as u64;
+                    let seed = self
+                        .arg_i64(args, 1)
+                        .wrapping_add(0x9E3779B97F4A7C15u64 as i64)
+                        as u64;
                     self.set_model_field(this, "seed", ObjectValue::Int(seed as i64));
                 }
                 CallResult::void()
             }
             "nextInt" | "nextLong" | "nextBytes" | "nextFloat" | "nextDouble" => {
                 let this = self.arg_obj(args, 0);
-                let mut seed = this.and_then(|id| self.model_field(id, "seed").map(|v| v.as_i64())).unwrap_or(0) as u64;
-                seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                let mut seed = this
+                    .and_then(|id| self.model_field(id, "seed").map(|v| v.as_i64()))
+                    .unwrap_or(0) as u64;
+                seed = seed
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
                 if let Some(this) = this {
                     self.set_model_field(this, "seed", ObjectValue::Int(seed as i64));
                 }
                 let v = (seed >> 33) as i32;
                 match name {
-                    "nextInt" => CallResult::int(if args.len() > 1 { v.abs() % self.arg_i32(args, 1).max(1) } else { v }),
+                    "nextInt" => CallResult::int(if args.len() > 1 {
+                        v.abs() % self.arg_i32(args, 1).max(1)
+                    } else {
+                        v
+                    }),
                     "nextLong" => CallResult::new(Some(Value::J(seed as i64)), None),
-                    "nextFloat" => CallResult::new(Some(Value::f32((v as f32) / (i32::MAX as f32))), None),
-                    "nextDouble" => CallResult::new(Some(Value::f64((v as f64) / (i32::MAX as f64))), None),
+                    "nextFloat" => {
+                        CallResult::new(Some(Value::f32((v as f32) / (i32::MAX as f32))), None)
+                    }
+                    "nextDouble" => {
+                        CallResult::new(Some(Value::f64((v as f64) / (i32::MAX as f64))), None)
+                    }
                     _ => CallResult::new(Some(Value::J(seed as i64)), None),
                 }
             }
@@ -1247,7 +1520,7 @@ impl Machine {
         }
     }
 
-    fn java_collections(&mut self, class: &str, name: &str, args: &[Value]) -> CallResult {
+    fn java_collections(&mut self, _class: &str, name: &str, _args: &[Value]) -> CallResult {
         match name {
             "size" => CallResult::int(0),
             "get" | "remove" | "put" => CallResult::obj(Value::NULL),
@@ -1259,7 +1532,7 @@ impl Machine {
         }
     }
 
-    fn java_json(&mut self, class: &str, name: &str, args: &[Value]) -> CallResult {
+    fn java_json(&mut self, _class: &str, name: &str, args: &[Value]) -> CallResult {
         match name {
             "<init>" => CallResult::void(),
             "put" | "getString" | "getInt" => {
@@ -1287,7 +1560,7 @@ fn truncate(s: &str, n: usize) -> String {
 }
 
 fn is_root_probe(path: &str) -> bool {
-    crate::env::EMULATOR_ARTIFACTS.iter().any(|p| *p == path)
+    crate::env::EMULATOR_ARTIFACTS.contains(&path)
         || path.contains("/su")
         || path.contains("superuser")
         || path.contains("Superuser")
@@ -1300,13 +1573,13 @@ fn is_root_probe(path: &str) -> bool {
 fn apply_cipher(alg: &str, mode: i32, key: &[u8], iv: &[u8], data: &[u8]) -> (Vec<u8>, bool) {
     let a = alg.to_ascii_uppercase();
     let encrypt = mode == 1; // Cipher.ENCRYPT_MODE
-    // Try the transformations we implement.
+                             // Try the transformations we implement.
     if a.starts_with("AES") {
         let r = if a.contains("CBC") {
             if encrypt {
                 k::aes_cbc_encrypt(data, key, iv)
             } else {
-                k::aes_cbc_decrypt(data, key, iv).map(|v| v)
+                k::aes_cbc_decrypt(data, key, iv)
             }
         } else if a.contains("CTR") {
             k::aes_ctr(data, key, iv)

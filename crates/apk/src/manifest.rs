@@ -82,9 +82,7 @@ fn exported(el: &Element) -> Option<bool> {
     el.attributes
         .iter()
         .find(|a| {
-            a.name == "exported"
-                || a.name.ends_with(":exported")
-                || a.name_res == 0x0101_0012
+            a.name == "exported" || a.name.ends_with(":exported") || a.name_res == 0x0101_0012
         })
         .and_then(|a| a.value.as_bool())
 }
@@ -239,10 +237,9 @@ pub fn interpret(doc: &Document) -> Manifest {
                 m.application_class = attr_str(child, "name");
                 m.debugabble = attr_bool(child, "debuggable").unwrap_or(false);
                 m.allow_backup = attr_bool(child, "allowBackup");
-                m.has_cleartext_attr = child
-                    .attributes
-                    .iter()
-                    .any(|a| a.name == "usesCleartextTraffic" || a.name.ends_with(":usesCleartextTraffic"));
+                m.has_cleartext_attr = child.attributes.iter().any(|a| {
+                    a.name == "usesCleartextTraffic" || a.name.ends_with(":usesCleartextTraffic")
+                });
                 m.uses_cleartext_traffic = attr_bool(child, "usesCleartextTraffic");
                 m.network_security_config = attr_str(child, "networkSecurityConfig");
                 m.extract_native_libs = attr_bool(child, "extractNativeLibs");
@@ -255,7 +252,9 @@ pub fn interpret(doc: &Document) -> Manifest {
                         "provider" => ComponentKind::Provider,
                         _ => continue,
                     };
-                    let Some(name) = component_name(comp_el) else { continue };
+                    let Some(name) = component_name(comp_el) else {
+                        continue;
+                    };
                     let (actions, categories) = collect_intent_filters(comp_el);
                     let declared_exported = exported(comp_el);
                     let has_filter = !actions.is_empty();
@@ -266,9 +265,7 @@ pub fn interpret(doc: &Document) -> Manifest {
                         Some(v) => v,
                         None => has_filter && target < 31,
                     };
-                    let is_main = actions
-                        .iter()
-                        .any(|a| a == "android.intent.action.MAIN")
+                    let is_main = actions.iter().any(|a| a == "android.intent.action.MAIN")
                         && categories
                             .iter()
                             .any(|c| c == "android.intent.category.LAUNCHER");

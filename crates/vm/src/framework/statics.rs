@@ -39,7 +39,12 @@ impl Machine {
             ("android/os/Build", "TIME") => return Some(Value::J(p.build_time)),
             ("android/os/Build$VERSION", "SDK_INT") => {
                 let sdk = p.sdk_int;
-                if self.env.checks.insert("build.SDK_INT".into(), sdk.to_string()).is_none() {
+                if self
+                    .env
+                    .checks
+                    .insert("build.SDK_INT".into(), sdk.to_string())
+                    .is_none()
+                {
                     self.emit(
                         crate::events::EventKind::Evasion,
                         crate::events::Layer::Framework,
@@ -86,7 +91,10 @@ impl Machine {
                     self.current_method_display(),
                     format!("android.os.Build.{name}"),
                     vec![format!("{name} = {s:?}")],
-                    Some(format!("Build.{name} read (profile {})", self.env.profile.name)),
+                    Some(format!(
+                        "Build.{name} read (profile {})",
+                        self.env.profile.name
+                    )),
                 );
             }
         }
@@ -159,7 +167,9 @@ impl Machine {
             E::Boolean(b) => Value::I(*b as i32),
             E::Null => Value::NULL,
             E::String(s) => self.new_string(s.clone(), Provenance::constant()),
-            E::Type(t) => match self.heap.alloc(crate::heap::Object::Class { descriptor: t.clone() }) {
+            E::Type(t) => match self.heap.alloc(crate::heap::Object::Class {
+                descriptor: t.clone(),
+            }) {
                 Some(id) => Value::obj(id),
                 None => Value::NULL,
             },
@@ -178,8 +188,13 @@ impl Machine {
                         .collect();
                     self.new_bytes(bytes, Provenance::of(Tag::PackedData))
                 } else {
-                    let values: Vec<Value> = items.iter().map(|i| self.materialise_encoded(i)).collect();
-                    match self.heap.new_obj_array("[Ljava/lang/Object;", values, Provenance::constant()) {
+                    let values: Vec<Value> =
+                        items.iter().map(|i| self.materialise_encoded(i)).collect();
+                    match self.heap.new_obj_array(
+                        "[Ljava/lang/Object;",
+                        values,
+                        Provenance::constant(),
+                    ) {
                         Some(id) => Value::obj(id),
                         None => Value::NULL,
                     }

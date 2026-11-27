@@ -5,7 +5,6 @@
 //! graph is recorded during the run: an edge exists because control really
 //! passed from one method to another.
 
-use crate::graph::graph_impl::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use unhusk_vm::events::Event;

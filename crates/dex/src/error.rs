@@ -37,7 +37,11 @@ impl ErrorKind {
 
 impl DexError {
     pub fn new(kind: ErrorKind, context: impl Into<String>) -> Self {
-        Self { kind, context: context.into(), offset: None }
+        Self {
+            kind,
+            context: context.into(),
+            offset: None,
+        }
     }
 
     pub fn at(mut self, offset: usize) -> Self {

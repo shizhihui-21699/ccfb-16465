@@ -121,10 +121,7 @@ impl<'a> Reader<'a> {
             }
             shift += 7;
             if shift > 35 {
-                return Err(DexError::new(
-                    ErrorKind::OutOfRange,
-                    "uleb128 too long",
-                ));
+                return Err(DexError::new(ErrorKind::OutOfRange, "uleb128 too long"));
             }
         }
         Ok(result)
@@ -144,7 +141,10 @@ impl<'a> Reader<'a> {
                 return Ok(result);
             }
         }
-        Err(DexError::new(ErrorKind::OutOfRange, "padded uleb128 too long"))
+        Err(DexError::new(
+            ErrorKind::OutOfRange,
+            "padded uleb128 too long",
+        ))
     }
 
     pub fn sleb128(&mut self) -> Result<i32> {
@@ -207,9 +207,7 @@ pub fn mutf8_to_string(bytes: &[u8]) -> Result<String> {
                 return Err(DexError::new(ErrorKind::BadString, "bad continuation byte"));
             }
             units.push(
-                (((b & 0x0f) as u16) << 12)
-                    | (((b2 & 0x3f) as u16) << 6)
-                    | (b3 & 0x3f) as u16,
+                (((b & 0x0f) as u16) << 12) | (((b2 & 0x3f) as u16) << 6) | (b3 & 0x3f) as u16,
             );
             i += 3;
         } else {

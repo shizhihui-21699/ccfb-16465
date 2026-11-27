@@ -175,8 +175,7 @@ impl<'a> ReportInput<'a> {
         let mut caveats = Vec::new();
         let mut profile_divergence: Vec<String> = Vec::new();
         {
-            let mut by_subject: std::collections::BTreeMap<&str, Vec<&str>> =
-                Default::default();
+            let mut by_subject: std::collections::BTreeMap<&str, Vec<&str>> = Default::default();
             for e in self.events {
                 if e.subject.starts_with("android.os.Build") && e.kind == EventKind::Evasion {
                     if let Some(v) = e.args.first() {

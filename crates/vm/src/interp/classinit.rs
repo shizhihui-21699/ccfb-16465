@@ -33,12 +33,21 @@ impl Machine {
     ///
     /// The caller's contract: after this returns `true`, the instruction that
     /// triggered initialisation must be re-executed once the stack unwinds.
-    pub(crate) fn ensure_class_initialised(&mut self, descriptor: &str) -> Result<bool, StopReason> {
+    pub(crate) fn ensure_class_initialised(
+        &mut self,
+        descriptor: &str,
+    ) -> Result<bool, StopReason> {
         if self.frames.len() >= self.budget.limits.max_call_depth {
-            self.budget.stop(StopReason::Budget, "call depth limit in class init");
+            self.budget
+                .stop(StopReason::Budget, "call depth limit in class init");
             return Err(StopReason::Budget);
         }
-        match self.class_states.get(descriptor).copied().unwrap_or(ClassState::Uninitialised) {
+        match self
+            .class_states
+            .get(descriptor)
+            .copied()
+            .unwrap_or(ClassState::Uninitialised)
+        {
             ClassState::Initialised | ClassState::Initialising => return Ok(false),
             ClassState::Failed => return Ok(false),
             ClassState::Uninitialised => {}
@@ -51,17 +60,20 @@ impl Machine {
             .copied()
             .find(|h| self.program.method(*h).code.is_some());
         let Some(clinit) = clinit else {
-            self.class_states.insert(descriptor.to_string(), ClassState::Initialised);
+            self.class_states
+                .insert(descriptor.to_string(), ClassState::Initialised);
             return Ok(false);
         };
-        self.class_states.insert(descriptor.to_string(), ClassState::Initialising);
+        self.class_states
+            .insert(descriptor.to_string(), ClassState::Initialising);
         match self.push_frame(clinit, Vec::new(), None, None) {
             Ok(()) => {
                 self.init_stack.push(descriptor.to_string());
                 Ok(true)
             }
             Err(r) => {
-                self.class_states.insert(descriptor.to_string(), ClassState::Failed);
+                self.class_states
+                    .insert(descriptor.to_string(), ClassState::Failed);
                 Err(r)
             }
         }
@@ -72,8 +84,14 @@ impl Machine {
     /// by an exception.
     pub(crate) fn finish_class_init(&mut self) {
         while let Some(desc) = self.init_stack.pop() {
-            self.class_states
-                .insert(desc, if self.budget.is_stopped() { ClassState::Failed } else { ClassState::Initialised });
+            self.class_states.insert(
+                desc,
+                if self.budget.is_stopped() {
+                    ClassState::Failed
+                } else {
+                    ClassState::Initialised
+                },
+            );
         }
     }
 }

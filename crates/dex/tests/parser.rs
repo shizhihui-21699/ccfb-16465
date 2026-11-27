@@ -27,7 +27,10 @@ fn set_string_table(d: &mut [u8], size: u32, off: u32) {
 
 #[test]
 fn rejects_non_dex() {
-    assert_eq!(parse(b"this is not a dex file").unwrap_err().kind, ErrorKind::BadMagic);
+    assert_eq!(
+        parse(b"this is not a dex file").unwrap_err().kind,
+        ErrorKind::BadMagic
+    );
 }
 
 #[test]
@@ -50,7 +53,10 @@ fn rejects_table_past_eof() {
     let mut d = dex_header();
     set_string_table(&mut d, 1, 0xffff_fff0);
     let e = parse(&d).unwrap_err();
-    assert!(matches!(e.kind, ErrorKind::Truncated | ErrorKind::OutOfRange));
+    assert!(matches!(
+        e.kind,
+        ErrorKind::Truncated | ErrorKind::OutOfRange
+    ));
 }
 
 #[test]
@@ -59,8 +65,14 @@ fn huge_declared_counts_fail_fast_without_allocating() {
     set_string_table(&mut d, 0x8000_0000, 0x70);
     let started = std::time::Instant::now();
     let e = parse(&d).unwrap_err();
-    assert!(started.elapsed().as_secs() < 5, "must not allocate on a claimed count");
-    assert!(matches!(e.kind, ErrorKind::Truncated | ErrorKind::OutOfRange));
+    assert!(
+        started.elapsed().as_secs() < 5,
+        "must not allocate on a claimed count"
+    );
+    assert!(matches!(
+        e.kind,
+        ErrorKind::Truncated | ErrorKind::OutOfRange
+    ));
 }
 
 #[test]

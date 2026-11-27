@@ -68,7 +68,8 @@ impl Machine {
     }
 
     fn load32(&self, addr: u64) -> Option<u32> {
-        self.read_mem(addr, 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        self.read_mem(addr, 4)
+            .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
     }
 
     /// Run from `start` until `ret`, an unsupported instruction, or the budget.
@@ -142,7 +143,9 @@ impl Machine {
             0b1010 | 0b1011 => self.branch(insn, pc),
             0b0100 | 0b0110 | 0b1100 | 0b1110 => self.load_store(insn, pc),
             0b0101 | 0b1101 => self.dp_reg(insn, pc),
-            _ => Err(format!("opcode 0x{insn:08x} (class {op0:#06b}) not emulated")),
+            _ => Err(format!(
+                "opcode 0x{insn:08x} (class {op0:#06b}) not emulated"
+            )),
         }
     }
 
@@ -401,9 +404,18 @@ impl Machine {
             }
         } else {
             let v = match size {
-                3 => self.read_mem(addr, 8).map(|b| u64::from_le_bytes(b.try_into().unwrap())).unwrap_or(0),
-                2 => self.read_mem(addr, 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()) as u64).unwrap_or(0),
-                1 => self.read_mem(addr, 2).map(|b| u16::from_le_bytes(b.try_into().unwrap()) as u64).unwrap_or(0),
+                3 => self
+                    .read_mem(addr, 8)
+                    .map(|b| u64::from_le_bytes(b.try_into().unwrap()))
+                    .unwrap_or(0),
+                2 => self
+                    .read_mem(addr, 4)
+                    .map(|b| u32::from_le_bytes(b.try_into().unwrap()) as u64)
+                    .unwrap_or(0),
+                1 => self
+                    .read_mem(addr, 2)
+                    .map(|b| u16::from_le_bytes(b.try_into().unwrap()) as u64)
+                    .unwrap_or(0),
                 _ => self.read_mem(addr, 1).map(|b| b[0] as u64).unwrap_or(0),
             };
             self.set_x(rt, v);
@@ -430,10 +442,18 @@ impl Machine {
             let shift = (insn >> 10) & 0x3F;
             let a = self.x(rn);
             let b = shift_reg(self.x(rm), shift_type, shift, sf);
-            let r = if sub { a.wrapping_sub(b) } else { a.wrapping_add(b) };
+            let r = if sub {
+                a.wrapping_sub(b)
+            } else {
+                a.wrapping_add(b)
+            };
             let r = if sf { r } else { r & 0xFFFF_FFFF };
             if set_flags || rd == 31 {
-                let (n, z, c, v) = if sub { flags_sub(a, b, sf) } else { flags_add(a, b, sf) };
+                let (n, z, c, v) = if sub {
+                    flags_sub(a, b, sf)
+                } else {
+                    flags_add(a, b, sf)
+                };
                 self.flags = (n, z, c, v);
             }
             self.set_x(rd, r);
@@ -470,7 +490,11 @@ impl Machine {
             let b = self.x(rm);
             let acc = self.x(ra);
             let prod = a.wrapping_mul(b);
-            let r = if sub { acc.wrapping_sub(prod) } else { acc.wrapping_add(prod) };
+            let r = if sub {
+                acc.wrapping_sub(prod)
+            } else {
+                acc.wrapping_add(prod)
+            };
             self.set_x(rd, if sf { r } else { r & 0xFFFF_FFFF });
             *pc += 4;
             return Ok(false);
@@ -505,8 +529,9 @@ impl Machine {
             return Ok(false);
         }
 
-        // CSEL family
-        if (insn >> 21) & 0x3FF == 0b0011_0100_00 {
+        // CSEL family: bits 28..21 == 0b00110100.
+        const CSEL_MASK: u32 = 0b0000_0011_0100_0000_0000;
+        if insn & CSEL_MASK == CSEL_MASK {
             let cond = (insn >> 12) & 0xF;
             let op = (insn >> 10) & 0x3;
             let a = self.x(rn);
@@ -540,7 +565,7 @@ fn shift_reg(v: u64, shift_type: u32, amount: u32, sf: bool) -> u64 {
                 if amount == 0 {
                     v
                 } else {
-                    (v >> amount) | (v << (64 - amount))
+                    v.rotate_right(amount)
                 }
             }
         }
@@ -638,7 +663,11 @@ fn decode_bit_masks(n: u32, imms: u32, immr: u32, sf: bool) -> Option<u64> {
 }
 
 fn rotate_right(v: u64, r: u32, esize: u32) -> u64 {
-    let mask = if esize >= 64 { !0u64 } else { (1u64 << esize) - 1 };
+    let mask = if esize >= 64 {
+        !0u64
+    } else {
+        (1u64 << esize) - 1
+    };
     let v = v & mask;
     let r = r % esize;
     if r == 0 {
@@ -673,7 +702,10 @@ fn exec_section(data: &[u8]) -> Option<Code<'_>> {
             let end = sh_offset.checked_add(sh_size)?;
             if end <= data.len() {
                 // Relocatable sections load at virtual address 0.
-                return Some(Code { bytes: &data[sh_offset..end], vaddr: 0 });
+                return Some(Code {
+                    bytes: &data[sh_offset..end],
+                    vaddr: 0,
+                });
             }
         }
     }
@@ -719,10 +751,16 @@ impl<'a> Code<'a> {
                 continue;
             }
             if file_offset >= p_offset && file_offset < p_offset + p_filesz {
-                return Some(Code { bytes: &data[start..end], vaddr: p_vaddr });
+                return Some(Code {
+                    bytes: &data[start..end],
+                    vaddr: p_vaddr,
+                });
             }
             // Remember the largest executable segment as a fallback.
-            if best.map(|(b, _)| b.len() < p_filesz as usize).unwrap_or(true) {
+            if best
+                .map(|(b, _)| b.len() < p_filesz as usize)
+                .unwrap_or(true)
+            {
                 best = Some((&data[start..end], p_vaddr));
             }
         }
@@ -756,7 +794,10 @@ impl<'a> Code<'a> {
                 let start = p_offset as usize;
                 let end = start.checked_add(p_filesz as usize)?;
                 if end <= data.len() {
-                    return Some(Code { bytes: &data[start..end], vaddr: p_vaddr });
+                    return Some(Code {
+                        bytes: &data[start..end],
+                        vaddr: p_vaddr,
+                    });
                 }
             }
         }
@@ -770,63 +811,6 @@ impl<'a> Code<'a> {
     pub fn first_word(&self) -> Option<u32> {
         let mut r = Reader::new(self.bytes);
         r.u32().ok()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn run(code: &[u32]) -> Machine {
-        let mut m = Machine::new(NativeLimits { max_steps: 1000 });
-        let mut bytes = Vec::new();
-        for w in code {
-            bytes.extend_from_slice(&w.to_le_bytes());
-        }
-        m.write_mem(m.mem_base, &bytes);
-        let base = m.mem_base;
-        m.run(base, &NativeLimits { max_steps: 1000 });
-        m
-    }
-
-    #[test]
-    fn movz_then_ret_returns_value() {
-        // movz x0, #0x1234 ; ret
-        let m = run(&[0xD282_4680, 0xD65F_03C0]);
-        assert_eq!(m.regs[0], 0x1234);
-    }
-
-    #[test]
-    fn add_immediate_accumulates() {
-        // movz x1, #5 ; add x0, x1, #10 ; ret
-        let m = run(&[0xD280_00A1, 0x9100_2820, 0xD65F_03C0]);
-        assert_eq!(m.regs[0], 15);
-    }
-
-    #[test]
-    fn loop_with_cbnz_runs() {
-        // movz x0,#0 ; movz x1,#10 ; add x0,x0,#2 ; sub x1,x1,#1 ; cbnz x1,-4 ; ret
-        let code = [
-            0xD280_0000, 0xD280_0141, 0x9100_0800, 0xD100_0421, 0xB5FF_FFC1, 0xD65F_03C0,
-        ];
-        let m = run(&code);
-        assert_eq!(m.regs[0], 20);
-    }
-
-    #[test]
-    fn unsupported_instruction_is_reported_not_guessed() {
-        let mut m = Machine::new(NativeLimits { max_steps: 100 });
-        m.write_mem(m.mem_base, &0u32.to_le_bytes());
-        match m.run(m.mem_base, &NativeLimits { max_steps: 100 }) {
-            NativeOutcome::Unsupported { reason, .. } => assert!(reason.contains("not emulated")),
-            other => panic!("expected Unsupported, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn bit_masks_decode_correctly() {
-        let mask = decode_bit_masks(1, 7, 0, true).unwrap();
-        assert_eq!(mask, 0xFF);
     }
 }
 
@@ -856,13 +840,17 @@ pub fn find_export(data: &[u8], name: &str) -> Option<(u64, u64)> {
         Some((ty, offset, size, link, entsize))
     };
     for i in 0..shnum {
-        let Some((ty, offset, size, link, entsize)) = sh(i) else { continue };
+        let Some((ty, offset, size, link, entsize)) = sh(i) else {
+            continue;
+        };
         // SHT_SYMTAB (2) or SHT_DYNSYM (11)
         if ty != 2 && ty != 11 {
             continue;
         }
         let entsize = if entsize == 0 { 24 } else { entsize };
-        let Some((_, str_off, str_size, _, _)) = sh(link as usize) else { continue };
+        let Some((_, str_off, str_size, _, _)) = sh(link as usize) else {
+            continue;
+        };
         let strtab = data
             .get(str_off as usize..(str_off + str_size) as usize)
             .unwrap_or_default();
@@ -919,4 +907,66 @@ pub fn find_export(data: &[u8], name: &str) -> Option<(u64, u64)> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(code: &[u32]) -> Machine {
+        let mut m = Machine::new(NativeLimits { max_steps: 1000 });
+        let mut bytes = Vec::new();
+        for w in code {
+            bytes.extend_from_slice(&w.to_le_bytes());
+        }
+        m.write_mem(m.mem_base, &bytes);
+        let base = m.mem_base;
+        m.run(base, &NativeLimits { max_steps: 1000 });
+        m
+    }
+
+    #[test]
+    fn movz_then_ret_returns_value() {
+        // movz x0, #0x1234 ; ret
+        let m = run(&[0xD282_4680, 0xD65F_03C0]);
+        assert_eq!(m.regs[0], 0x1234);
+    }
+
+    #[test]
+    fn add_immediate_accumulates() {
+        // movz x1, #5 ; add x0, x1, #10 ; ret
+        let m = run(&[0xD280_00A1, 0x9100_2820, 0xD65F_03C0]);
+        assert_eq!(m.regs[0], 15);
+    }
+
+    #[test]
+    fn loop_with_cbnz_runs() {
+        // movz x0,#0 ; movz x1,#10 ; add x0,x0,#2 ; sub x1,x1,#1 ; cbnz x1,-4 ; ret
+        let code = [
+            0xD280_0000,
+            0xD280_0141,
+            0x9100_0800,
+            0xD100_0421,
+            0xB5FF_FFC1,
+            0xD65F_03C0,
+        ];
+        let m = run(&code);
+        assert_eq!(m.regs[0], 20);
+    }
+
+    #[test]
+    fn unsupported_instruction_is_reported_not_guessed() {
+        let mut m = Machine::new(NativeLimits { max_steps: 100 });
+        m.write_mem(m.mem_base, &0u32.to_le_bytes());
+        match m.run(m.mem_base, &NativeLimits { max_steps: 100 }) {
+            NativeOutcome::Unsupported { reason, .. } => assert!(reason.contains("not emulated")),
+            other => panic!("expected Unsupported, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bit_masks_decode_correctly() {
+        let mask = decode_bit_masks(1, 7, 0, true).unwrap();
+        assert_eq!(mask, 0xFF);
+    }
 }

@@ -13,8 +13,8 @@ pub mod reader;
 pub use error::{DexError, ErrorKind, Result};
 pub use model::parse;
 pub use model::{
-    Class, ClassData, Code, EncodedValue, Field, FieldRef, InsnTable, Method, MethodRef,
-    ProtoRef, Type, DexFile,
+    Class, ClassData, Code, DexFile, EncodedValue, Field, FieldRef, InsnTable, Method, MethodRef,
+    ProtoRef, Type,
 };
 
 /// DEX magic as it appears in every file.

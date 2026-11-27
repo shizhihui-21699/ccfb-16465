@@ -12,7 +12,7 @@ impl Machine {
     pub(crate) fn op_move(&mut self, insn: &Insn) -> Result<(), StopReason> {
         let v = self.reg(insn.b);
         match insn.op {
-            0x04 | 0x05 | 0x06 => self.set_reg_pair(insn.a, v),
+            0x04..=0x06 => self.set_reg_pair(insn.a, v),
             _ => self.set_reg(insn.a, v),
         }
         Ok(())
@@ -29,7 +29,12 @@ impl Machine {
         let Some(frame) = self.frames.last() else {
             return Ok(());
         };
-        let s = self.program.dex(frame.method.dex).string(idx).unwrap_or("").to_string();
+        let s = self
+            .program
+            .dex(frame.method.dex)
+            .string(idx)
+            .unwrap_or("")
+            .to_string();
         match self.heap.new_string(s, Provenance::constant()) {
             Some(id) => {
                 self.set_reg(insn.a, Value::obj(id));
@@ -67,12 +72,21 @@ impl Machine {
         let Some(frame) = self.frames.last() else {
             return Ok(());
         };
-        let Some(target) = self.program.dex(frame.method.dex).type_at(insn.b as u32).map(str::to_string) else {
+        let Some(target) = self
+            .program
+            .dex(frame.method.dex)
+            .type_at(insn.b as u32)
+            .map(str::to_string)
+        else {
             return Ok(());
         };
         let v = self.reg(insn.a);
         let Some(obj) = v.as_obj() else { return Ok(()) };
-        let class = self.heap.get(obj).map(|o| o.class_name().to_string()).unwrap_or_default();
+        let class = self
+            .heap
+            .get(obj)
+            .map(|o| o.class_name().to_string())
+            .unwrap_or_default();
         if class.is_empty() || class == target {
             return Ok(());
         }
@@ -82,9 +96,12 @@ impl Machine {
         if both_concrete
             && !self.program.is_subclass_of(&class, &target)
             && !self.program.is_subclass_of(&target, &class)
-            && !self.program.class_exists(&target) == false
+            && self.program.class_exists(&target)
         {
-            return self.throw_class("Ljava/lang/ClassCastException;", format!("{class} -> {target}"));
+            return self.throw_class(
+                "Ljava/lang/ClassCastException;",
+                format!("{class} -> {target}"),
+            );
         }
         Ok(())
     }
@@ -103,7 +120,11 @@ impl Machine {
         let result = match v.as_obj() {
             None => 0,
             Some(obj) => {
-                let class = self.heap.get(obj).map(|o| o.class_name().to_string()).unwrap_or_default();
+                let class = self
+                    .heap
+                    .get(obj)
+                    .map(|o| o.class_name().to_string())
+                    .unwrap_or_default();
                 if class == target
                     || (class.starts_with('L')
                         && target.starts_with('L')
@@ -183,7 +204,8 @@ impl Machine {
             return self.throw_class("Ljava/lang/NegativeArraySizeException;", count.to_string());
         }
         if count as usize > self.budget.limits.max_allocation_bytes {
-            self.budget.stop(StopReason::Budget, "array allocation too large");
+            self.budget
+                .stop(StopReason::Budget, "array allocation too large");
             return Err(StopReason::Budget);
         }
         let width = element_width(&elem);
@@ -210,7 +232,10 @@ impl Machine {
             .to_string();
         // Collect registers: either the explicit list or a range.
         let regs: Vec<u16> = if matches!(insn.format, unhusk_dex::insn::Format::F35c) {
-            insn.regs[..insn.a.min(5) as usize].iter().map(|&r| r as u16).collect()
+            insn.regs[..insn.a.min(5) as usize]
+                .iter()
+                .map(|&r| r as u16)
+                .collect()
         } else {
             (0..insn.a).map(|i| insn.c + i).collect()
         };
@@ -218,14 +243,12 @@ impl Machine {
         for r in &regs {
             values.push(self.reg(*r));
         }
-        let id = self.heap.new_obj_array(elem, values, Provenance::default());
-        match id {
+        // `filled-new-array` does not write to a register: its result is
+        // consumed by the `move-result-object` that must follow it, and the
+        // invoke engine picks the object up from `pending_result`.
+        match self.heap.new_obj_array(elem, values, Provenance::default()) {
             Some(id) => {
-                self.set_reg(insn.a.min(0).max(
-                    if matches!(insn.format, unhusk_dex::insn::Format::F35c) { 0 } else { 0 },
-                ), Value::obj(id));
-                // filled-new-array writes its result to the *next* instruction's
-                // move-result, which the caller handles; nothing else to do.
+                self.pending_result = Some(Value::obj(id));
                 Ok(())
             }
             None => self.heap_oom(),
@@ -239,14 +262,23 @@ impl Machine {
         let Some(code) = self.program.method(frame.method).code.as_ref() else {
             return Ok(());
         };
-        let Some(target) = insn.target else { return Ok(()) };
+        let Some(target) = insn.target else {
+            return Ok(());
+        };
         // Locate the payload and copy its raw bytes into the array.
         let payload = code.instructions.iter().find(|i| i.pc == target);
-        let Some(payload) = payload else { return Ok(()) };
+        let Some(payload) = payload else {
+            return Ok(());
+        };
         let base = (target as usize) + 4; // skip ident, width, size(2)
-        let Some(units) = code.units.get(base..) else { return Ok(()) };
+        let Some(units) = code.units.get(base..) else {
+            return Ok(());
+        };
         let mut data = Vec::with_capacity(payload.width as usize * 2);
-        for u in units.iter().take((payload.width as usize).saturating_sub(4)) {
+        for u in units
+            .iter()
+            .take((payload.width as usize).saturating_sub(4))
+        {
             data.extend_from_slice(&u.to_le_bytes());
         }
         let array_reg = insn.a;
@@ -288,14 +320,18 @@ impl Machine {
         let Some(code) = self.program.method(frame.method).code.as_ref() else {
             return Ok(());
         };
-        let Some(target_pc) = insn.target else { return Ok(()) };
+        let Some(target_pc) = insn.target else {
+            return Ok(());
+        };
         let Some(payload) = code.instructions.iter().find(|i| i.pc == target_pc) else {
             return Ok(());
         };
         let base = (target_pc as usize) + 2;
         let mut dest: Option<u32> = None;
         if matches!(payload.kind, unhusk_dex::insn::InsnKind::PackedSwitch) {
-            let Some(units) = code.units.get(base..) else { return Ok(()) };
+            let Some(units) = code.units.get(base..) else {
+                return Ok(());
+            };
             if units.len() < 2 {
                 return Ok(());
             }
@@ -309,19 +345,24 @@ impl Machine {
                 }
             }
         } else {
-            let Some(units) = code.units.get(base..) else { return Ok(()) };
-            if units.len() < 1 {
+            let Some(units) = code.units.get(base..) else {
+                return Ok(());
+            };
+            if units.is_empty() {
                 return Ok(());
             }
             let size = units[0] as usize;
             for i in 0..size {
                 let kp = 1 + i * 2;
-                let Some(kw) = code.units.get(base + kp..base + kp + 2) else { break };
+                let Some(kw) = code.units.get(base + kp..base + kp + 2) else {
+                    break;
+                };
                 let k = ((kw[0] as u32) | ((kw[1] as u32) << 16)) as i32;
                 if k == key {
                     let tp = 1 + size * 2 + i * 2;
                     if let Some(tw) = code.units.get(base + tp..base + tp + 2) {
-                        dest = Some(((tw[0] as u32) | ((tw[1] as u32) << 16)).wrapping_add(insn.pc));
+                        dest =
+                            Some(((tw[0] as u32) | ((tw[1] as u32) << 16)).wrapping_add(insn.pc));
                     }
                     break;
                 }
@@ -418,12 +459,19 @@ impl Machine {
             return self.throw_class("Ljava/lang/NullPointerException;", "aget on null");
         };
         if idx < 0 {
-            return self.throw_class("Ljava/lang/ArrayIndexOutOfBoundsException;", idx.to_string());
+            return self.throw_class(
+                "Ljava/lang/ArrayIndexOutOfBoundsException;",
+                idx.to_string(),
+            );
         }
-        let mut value = Value::I(0);
+        let mut value;
         let mut prov = Provenance::default();
         match self.heap.get(id) {
-            Some(Object::Array { bytes, elem, prov: p }) => {
+            Some(Object::Array {
+                bytes,
+                elem,
+                prov: p,
+            }) => {
                 prov.merge(p);
                 let width = element_width(elem);
                 let start = idx as usize * width;
@@ -433,19 +481,21 @@ impl Machine {
                         format!("{idx} of {}", bytes.len() / width.max(1)),
                     );
                 }
-                value = match (insn.op, width) {
-                    (0x45, 8) => Value::J(i64::from_le_bytes(bytes[start..start + 8].try_into().unwrap())),
-                    (0x46, _) => {
-                        // aget-object on a reference array: not representable;
-                        // we keep the handle in an ObjArray path below.
-                        Value::I(0)
-                    }
-                    (_, 8) => Value::J(i64::from_le_bytes(bytes[start..start + 8].try_into().unwrap())),
-                    (_, 4) => Value::I(i32::from_le_bytes(bytes[start..start + 4].try_into().unwrap())),
-                    (_, 2) => Value::I(i16::from_le_bytes(bytes[start..start + 2].try_into().unwrap()) as i32),
+                value = match width {
+                    8 => Value::J(i64::from_le_bytes(
+                        bytes[start..start + 8].try_into().unwrap(),
+                    )),
+                    4 => Value::I(i32::from_le_bytes(
+                        bytes[start..start + 4].try_into().unwrap(),
+                    )),
+                    2 => Value::I(
+                        i16::from_le_bytes(bytes[start..start + 2].try_into().unwrap()) as i32,
+                    ),
                     _ => Value::I(bytes[start] as i8 as i32),
                 };
                 if matches!(insn.op, 0x47) {
+                    // aget-boolean: Dalvik stores booleans as 0/1 bytes, so
+                    // any non-zero byte reads as true.
                     value = Value::I((value.as_i32() != 0) as i32);
                 }
             }
@@ -453,7 +503,10 @@ impl Machine {
                 prov.merge(p);
                 value = items.get(idx as usize).copied().unwrap_or(Value::NULL);
             }
-            _ => return self.throw_class("Ljava/lang/ArrayIndexOutOfBoundsException;", "not an array"),
+            _ => {
+                return self
+                    .throw_class("Ljava/lang/ArrayIndexOutOfBoundsException;", "not an array")
+            }
         }
         self.set_reg(insn.a, value);
         Ok(())
@@ -468,7 +521,10 @@ impl Machine {
             return self.throw_class("Ljava/lang/NullPointerException;", "aput on null");
         };
         if idx < 0 {
-            return self.throw_class("Ljava/lang/ArrayIndexOutOfBoundsException;", idx.to_string());
+            return self.throw_class(
+                "Ljava/lang/ArrayIndexOutOfBoundsException;",
+                idx.to_string(),
+            );
         }
         // Provenance of the stored value propagates to the array.
         let val_prov = val
@@ -478,7 +534,10 @@ impl Machine {
         // Validate the index before mutating, so an out-of-range store can
         // still raise a modelled exception.
         let (width, cap) = match self.heap.get(id) {
-            Some(Object::Array { bytes, elem, .. }) => (element_width(elem), bytes.len() / element_width(elem).max(1)),
+            Some(Object::Array { bytes, elem, .. }) => (
+                element_width(elem),
+                bytes.len() / element_width(elem).max(1),
+            ),
             Some(Object::ObjArray { items, .. }) => (1, items.len()),
             _ => (0, 0),
         };
@@ -507,14 +566,20 @@ impl Machine {
             }
             Some(Object::ObjArray { items, prov, .. }) => {
                 if idx as usize >= items.len() {
-                    return self.throw_class("Ljava/lang/ArrayIndexOutOfBoundsException;", idx.to_string());
+                    return self.throw_class(
+                        "Ljava/lang/ArrayIndexOutOfBoundsException;",
+                        idx.to_string(),
+                    );
                 }
                 items[idx as usize] = val;
                 if let Some(p) = &new_prov {
                     prov.merge(p);
                 }
             }
-            _ => return self.throw_class("Ljava/lang/ArrayIndexOutOfBoundsException;", "not an array"),
+            _ => {
+                return self
+                    .throw_class("Ljava/lang/ArrayIndexOutOfBoundsException;", "not an array")
+            }
         }
         Ok(())
     }
@@ -528,7 +593,9 @@ impl Machine {
         };
         let field = self.field_id_at(insn.c as u32);
         let value = match self.heap.get(id) {
-            Some(Object::Instance { fields, .. }) => fields.get(&field).copied().unwrap_or(Value::I(0)),
+            Some(Object::Instance { fields, .. }) => {
+                fields.get(&field).copied().unwrap_or(Value::I(0))
+            }
             Some(Object::Model { fields, .. }) => {
                 // Model objects expose fields by name for the framework layer.
                 let name = self.program.field_name(field).to_string();
@@ -573,11 +640,22 @@ impl Machine {
         // Framework statics (Build.FINGERPRINT, System.out, ...) are modelled
         // before the sample's own static storage.
         if std::env::var("UNHUSK_DEBUG").is_ok() {
-            eprintln!("  sget op={:#x} reg=v{} field={class}->{name}", insn.op, insn.a);
+            eprintln!(
+                "  sget op={:#x} reg=v{} field={class}->{name}",
+                insn.op, insn.a
+            );
         }
         if let Some(v) = self.framework_static(&class, &name) {
             if std::env::var("UNHUSK_DEBUG").is_ok() {
-                eprintln!("    -> v{} = {:?} (heap len {} get={:?})", insn.a, v, self.heap.len(), v.as_obj().and_then(|i| self.heap.get(i)).map(|o| o.class_name().to_string()));
+                eprintln!(
+                    "    -> v{} = {:?} (heap len {} get={:?})",
+                    insn.a,
+                    v,
+                    self.heap.len(),
+                    v.as_obj()
+                        .and_then(|i| self.heap.get(i))
+                        .map(|o| o.class_name().to_string())
+                );
             }
             if matches!(insn.op, 0x63 | 0x67) {
                 // sget-boolean normalises to 0/1.
@@ -670,7 +748,11 @@ impl Machine {
         let a = self.reg(insn.b);
         let lit = Value::I(insn.literal as i32);
         let (x, y) = if insn.op == 0xd9 { (lit, a) } else { (a, lit) };
-        let op = if insn.op >= 0xe0 { insn.op - 0x08 } else { insn.op };
+        let op = if insn.op >= 0xe0 {
+            insn.op - 0x08
+        } else {
+            insn.op
+        };
         let r = binop(op, x, y);
         self.set_reg(insn.a, r);
         Ok(())
@@ -693,7 +775,11 @@ pub(crate) fn element_width(array_type: &str) -> usize {
 
 fn float_cmp(a: f32, b: f32, nan_greater: bool) -> i32 {
     if a.is_nan() || b.is_nan() {
-        if nan_greater { 1 } else { -1 }
+        if nan_greater {
+            1
+        } else {
+            -1
+        }
     } else if a < b {
         -1
     } else if a > b {
@@ -705,7 +791,11 @@ fn float_cmp(a: f32, b: f32, nan_greater: bool) -> i32 {
 
 fn float_cmp64(a: f64, b: f64, nan_greater: bool) -> i32 {
     if a.is_nan() || b.is_nan() {
-        if nan_greater { 1 } else { -1 }
+        if nan_greater {
+            1
+        } else {
+            -1
+        }
     } else if a < b {
         -1
     } else if a > b {
@@ -755,11 +845,19 @@ fn binop(op: u8, a: Value, b: Value) -> Value {
         0x92 => Value::I(a.as_i32().wrapping_mul(b.as_i32())),
         0x93 => {
             let d = b.as_i32();
-            if d == 0 { Value::I(0) } else { Value::I(a.as_i32().wrapping_div(d)) }
+            if d == 0 {
+                Value::I(0)
+            } else {
+                Value::I(a.as_i32().wrapping_div(d))
+            }
         }
         0x94 => {
             let d = b.as_i32();
-            if d == 0 { Value::I(0) } else { Value::I(a.as_i32().wrapping_rem(d)) }
+            if d == 0 {
+                Value::I(0)
+            } else {
+                Value::I(a.as_i32().wrapping_rem(d))
+            }
         }
         0x95 => Value::I(a.as_i32() & b.as_i32()),
         0x96 => Value::I(a.as_i32() | b.as_i32()),
@@ -773,11 +871,19 @@ fn binop(op: u8, a: Value, b: Value) -> Value {
         0x9d => Value::J(a.as_i64().wrapping_mul(b.as_i64())),
         0x9e => {
             let d = b.as_i64();
-            if d == 0 { Value::J(0) } else { Value::J(a.as_i64().wrapping_div(d)) }
+            if d == 0 {
+                Value::J(0)
+            } else {
+                Value::J(a.as_i64().wrapping_div(d))
+            }
         }
         0x9f => {
             let d = b.as_i64();
-            if d == 0 { Value::J(0) } else { Value::J(a.as_i64().wrapping_rem(d)) }
+            if d == 0 {
+                Value::J(0)
+            } else {
+                Value::J(a.as_i64().wrapping_rem(d))
+            }
         }
         0xa0 => Value::J(a.as_i64() & b.as_i64()),
         0xa1 => Value::J(a.as_i64() | b.as_i64()),

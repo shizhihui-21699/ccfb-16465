@@ -66,6 +66,8 @@ pub struct NativeLimits {
 
 impl Default for NativeLimits {
     fn default() -> Self {
-        Self { max_steps: 5_000_000 }
+        Self {
+            max_steps: 5_000_000,
+        }
     }
 }
