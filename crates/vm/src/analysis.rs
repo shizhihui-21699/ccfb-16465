@@ -121,6 +121,17 @@ pub fn analyze(apk: &Apk, cfg: &AnalysisConfig) -> Analysis {
     env.fs.existing.push(env.app_data_dir.clone());
 
     let mut machine = Machine::new(program, env, cfg.limits.clone(), cfg.policy.clone());
+    // Native libraries are offered to the JNI dispatcher: a `native` method
+    // declaration is resolved against these by mangled symbol name.
+    if cfg.policy.emulate_native {
+        for (abi, path) in apk.native_libs() {
+            if abi == "arm64-v8a" {
+                if let Ok(Some(data)) = apk.read(&path) {
+                    machine.native_libraries.push((path, data));
+                }
+            }
+        }
+    }
     machine.app_class = apk.manifest.application_class.clone();
     machine.granted_permissions = apk.manifest.permissions.clone();
 

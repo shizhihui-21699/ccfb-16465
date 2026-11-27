@@ -666,7 +666,13 @@ impl Machine {
             "maxMemory" | "totalMemory" | "freeMemory" => CallResult::new(Some(Value::J(268_435_456)), None),
             "loadLibrary" | "load" => {
                 let n = self.arg_str_or(args, 1);
-                CallResult::new(None, Some(obs(Level::Critical, "load", format!("Runtime.loadLibrary({n})"))))
+                if !n.is_empty() {
+                    self.note_native_library(&n);
+                }
+                CallResult::new(
+                    None,
+                    Some(obs(Level::Critical, "load", format!("Runtime.loadLibrary({n})"))),
+                )
             }
             "addShutdownHook" | "exit" | "halt" => CallResult::void(),
             _ => CallResult::void(),

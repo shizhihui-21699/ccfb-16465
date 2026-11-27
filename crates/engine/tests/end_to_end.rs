@@ -88,6 +88,24 @@ fn evasive_sample_reaches_beacon_only_after_gates_pass() {
 }
 
 #[test]
+fn native_decryptor_payload_is_recovered_and_executed() {
+    // The payload cipher lives in libdecrypt.so, not in the DEX. Reaching the
+    // payload requires: resolving the JNI export, running the AArch64 routine,
+    // copying the modified argument back into the Java array, then loading it.
+    let f = analyse("native");
+    assert!(
+        !f.report.recovered.is_empty(),
+        "the native decryptor's output must be recovered as a DEX"
+    );
+    let ran_recovered = f.outcome.trace.events.iter().any(|e| {
+        e.kind == EventKind::MethodEnter && e.layer == unhusk_vm::events::Layer::RecoveredDex
+    });
+    assert!(ran_recovered, "recovered payload must be executed");
+    let top = f.report.findings.first().expect("finding");
+    assert_eq!(top.severity, unhusk_report::Severity::Critical);
+}
+
+#[test]
 fn profile_comparison_shows_the_evasion_signal() {
     let f = analyse("evasive");
     let emu = f
@@ -106,7 +124,7 @@ fn profile_comparison_shows_the_evasion_signal() {
 
 #[test]
 fn report_renders_without_panicking_on_all_fixtures() {
-    for name in ["hello", "packer", "evasive"] {
+    for name in ["hello", "packer", "native", "evasive"] {
         let f = analyse(name);
         let text = render_text(&f.report, true);
         assert!(text.contains("VERDICT"), "{name}: {text}");

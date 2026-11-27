@@ -90,7 +90,29 @@ def main():
     manifest_bin(FIX / "manifest" / "packer.xml", w / "AndroidManifest.xml")
     make_apk("packer", w / "dex" / "classes.dex", w / "AndroidManifest.xml")
 
-    # 3. evasive: uses android.os.Build and java.io.File probes.
+    # 3. native: the payload is decrypted by a JNI routine in libdecrypt.so.
+    #    The .so is compiled ahead of time and committed under fixtures/native/
+    #    so the fixture build does not need an AArch64 linker.
+    payload_dex = (WORK / "payload" / "dex" / "classes.dex").read_bytes()
+    key = b"Q/m8"
+    blob = bytes(b ^ key[i % len(key)] for i, b in enumerate(payload_dex))
+    arr = ",".join(f"(byte)0x{b:02x}" for b in blob)
+    nsrc = WORK / "native-src"
+    shutil.copytree(FIX / "src" / "native", nsrc)
+    loader = nsrc / "com/example/jnistub/JniLoader.java"
+    loader.write_text(loader.read_text().replace("// NATIVE_BLOB_PLACEHOLDER", arr))
+    w = WORK / "native"
+    javac(nsrc, w / "cls")
+    d8(w / "cls", w / "dex")
+    manifest_bin(FIX / "manifest" / "native.xml", w / "AndroidManifest.xml")
+    make_apk(
+        "native",
+        w / "dex" / "classes.dex",
+        w / "AndroidManifest.xml",
+        {"lib/arm64-v8a/libdecrypt.so": FIX / "native" / "libdecrypt.so"},
+    )
+
+    # 4. evasive: uses android.os.Build and java.io.File probes.
     w = WORK / "evasive"
     javac(FIX / "src" / "evasive", w / "cls")
     d8(w / "cls", w / "dex")

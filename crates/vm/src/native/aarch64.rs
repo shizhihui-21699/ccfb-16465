@@ -687,6 +687,48 @@ pub struct Code<'a> {
 }
 
 impl<'a> Code<'a> {
+    /// Locate the executable `PT_LOAD` segment that contains `file_offset`.
+    ///
+    /// A shared object usually has several executable segments (`.init`,
+    /// `.plt`, `.text`); taking the *first* one silently emulates the wrong
+    /// code. The caller passes the offset of the function it wants.
+    pub fn from_elf_at(data: &'a [u8], file_offset: u64) -> Option<Self> {
+        if data.len() < 64 || &data[0..4] != b"\x7fELF" || data[4] != 2 {
+            return None;
+        }
+        let phoff = u64::from_le_bytes(data[32..40].try_into().ok()?) as usize;
+        let phentsize = u16::from_le_bytes(data[54..56].try_into().ok()?) as usize;
+        let phnum = u16::from_le_bytes(data[56..58].try_into().ok()?) as usize;
+        let mut best: Option<(&[u8], u64)> = None;
+        for i in 0..phnum {
+            let off = phoff.checked_add(i.checked_mul(phentsize)?)?;
+            if off + 56 > data.len() {
+                break;
+            }
+            let p_type = u32::from_le_bytes(data[off..off + 4].try_into().ok()?);
+            let p_flags = u32::from_le_bytes(data[off + 4..off + 8].try_into().ok()?);
+            let p_offset = u64::from_le_bytes(data[off + 8..off + 16].try_into().ok()?);
+            let p_vaddr = u64::from_le_bytes(data[off + 16..off + 24].try_into().ok()?);
+            let p_filesz = u64::from_le_bytes(data[off + 32..off + 40].try_into().ok()?);
+            if p_type != 1 || p_flags & 1 == 0 || p_filesz == 0 {
+                continue;
+            }
+            let start = p_offset as usize;
+            let end = start.checked_add(p_filesz as usize)?;
+            if end > data.len() {
+                continue;
+            }
+            if file_offset >= p_offset && file_offset < p_offset + p_filesz {
+                return Some(Code { bytes: &data[start..end], vaddr: p_vaddr });
+            }
+            // Remember the largest executable segment as a fallback.
+            if best.map(|(b, _)| b.len() < p_filesz as usize).unwrap_or(true) {
+                best = Some((&data[start..end], p_vaddr));
+            }
+        }
+        best.map(|(bytes, vaddr)| Code { bytes, vaddr })
+    }
+
     /// Locate the first `PT_LOAD` segment with the execute bit set.
     pub fn from_elf(data: &'a [u8]) -> Option<Self> {
         if data.len() < 64 || &data[0..4] != b"\x7fELF" || data[4] != 2 {
@@ -786,4 +828,95 @@ mod tests {
         let mask = decode_bit_masks(1, 7, 0, true).unwrap();
         assert_eq!(mask, 0xFF);
     }
+}
+
+/// Find an exported function in an ELF by name, returning its file offset and
+/// virtual address. Supports both `.symtab` and `.dynsym`.
+pub fn find_export(data: &[u8], name: &str) -> Option<(u64, u64)> {
+    if data.len() < 64 || &data[0..4] != b"\x7fELF" || data[4] != 2 {
+        return None;
+    }
+    let shoff = u64::from_le_bytes(data[40..48].try_into().ok()?) as usize;
+    let shentsize = u16::from_le_bytes(data[58..60].try_into().ok()?) as usize;
+    let shnum = u16::from_le_bytes(data[60..62].try_into().ok()?) as usize;
+    if shoff == 0 || shentsize == 0 {
+        return None;
+    }
+    let sh = |i: usize| -> Option<(u32, u64, u64, u64, u64)> {
+        // (type, offset, size, link, entsize)
+        let off = shoff.checked_add(i.checked_mul(shentsize)?)?;
+        if off + 64 > data.len() {
+            return None;
+        }
+        let ty = u32::from_le_bytes(data[off + 4..off + 8].try_into().ok()?);
+        let offset = u64::from_le_bytes(data[off + 24..off + 32].try_into().ok()?);
+        let size = u64::from_le_bytes(data[off + 32..off + 40].try_into().ok()?);
+        let link = u32::from_le_bytes(data[off + 40..off + 44].try_into().ok()?) as u64;
+        let entsize = u64::from_le_bytes(data[off + 56..off + 64].try_into().ok()?);
+        Some((ty, offset, size, link, entsize))
+    };
+    for i in 0..shnum {
+        let Some((ty, offset, size, link, entsize)) = sh(i) else { continue };
+        // SHT_SYMTAB (2) or SHT_DYNSYM (11)
+        if ty != 2 && ty != 11 {
+            continue;
+        }
+        let entsize = if entsize == 0 { 24 } else { entsize };
+        let Some((_, str_off, str_size, _, _)) = sh(link as usize) else { continue };
+        let strtab = data
+            .get(str_off as usize..(str_off + str_size) as usize)
+            .unwrap_or_default();
+        let count = size / entsize;
+        for k in 0..count {
+            let e = offset as usize + k as usize * entsize as usize;
+            if e + 24 > data.len() {
+                break;
+            }
+            let st_name = u32::from_le_bytes(data[e..e + 4].try_into().ok()?) as usize;
+            let st_info = data[e + 4];
+            let st_value = u64::from_le_bytes(data[e + 8..e + 16].try_into().ok()?);
+            let st_shndx = u16::from_le_bytes(data[e + 6..e + 8].try_into().ok()?);
+            // STB_GLOBAL / STB_WEAK and STT_FUNC, defined in a real section.
+            let bind = st_info >> 4;
+            let kind = st_info & 0xf;
+            if bind != 1 && bind != 2 {
+                continue;
+            }
+            if kind != 2 && kind != 10 {
+                continue;
+            }
+            if st_shndx == 0 {
+                continue;
+            }
+            let Some(sym) = strtab.get(st_name..).and_then(|s| {
+                let end = s.iter().position(|&c| c == 0)?;
+                std::str::from_utf8(&s[..end]).ok()
+            }) else {
+                continue;
+            };
+            if sym != name {
+                continue;
+            }
+            // Translate the virtual address back to a file offset via the
+            // program headers.
+            let phoff = u64::from_le_bytes(data[32..40].try_into().ok()?) as usize;
+            let phentsize = u16::from_le_bytes(data[54..56].try_into().ok()?) as usize;
+            let phnum = u16::from_le_bytes(data[56..58].try_into().ok()?) as usize;
+            for p in 0..phnum {
+                let po = phoff + p * phentsize;
+                if po + 56 > data.len() {
+                    break;
+                }
+                let p_type = u32::from_le_bytes(data[po..po + 4].try_into().ok()?);
+                let p_offset = u64::from_le_bytes(data[po + 8..po + 16].try_into().ok()?);
+                let p_vaddr = u64::from_le_bytes(data[po + 16..po + 24].try_into().ok()?);
+                let p_filesz = u64::from_le_bytes(data[po + 32..po + 40].try_into().ok()?);
+                if p_type == 1 && st_value >= p_vaddr && st_value < p_vaddr + p_filesz {
+                    return Some((p_offset + (st_value - p_vaddr), st_value));
+                }
+            }
+            return Some((st_value, st_value));
+        }
+    }
+    None
 }

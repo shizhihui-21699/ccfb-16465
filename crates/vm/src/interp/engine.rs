@@ -54,6 +54,8 @@ impl Machine {
             granted_permissions: Vec::new(),
             executed: Vec::new(),
             entered: Default::default(),
+            native_libraries: Vec::new(),
+            loaded_libraries: Vec::new(),
             class_states: Default::default(),
             init_stack: Vec::new(),
         }

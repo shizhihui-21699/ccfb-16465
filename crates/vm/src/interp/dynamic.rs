@@ -286,3 +286,253 @@ impl Machine {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Native layer
+// ---------------------------------------------------------------------------
+
+use crate::native::{NativeLimits, NativeOutcome};
+
+impl Machine {
+    /// A `System.loadLibrary("foo")` was called. Record it and remember the
+    /// library so a later `native` method declaration can be dispatched to it.
+    pub(crate) fn note_native_library(&mut self, name: &str) {
+        let lib = if name.ends_with(".so") {
+            name.to_string()
+        } else {
+            format!("lib{name}.so")
+        };
+        if !self.loaded_libraries.contains(&lib) {
+            self.loaded_libraries.push(lib.clone());
+        }
+        self.emit(
+            crate::events::EventKind::DynamicLoad,
+            crate::events::Layer::Native,
+            self.current_method_display(),
+            format!("System.loadLibrary({name})"),
+            vec![lib.clone()],
+            Some("library registered for native dispatch".into()),
+        );
+    }
+
+    /// Invoke a `native` method declared by a sample class.
+    ///
+    /// This is where most real packers do their work: the DEX declares
+    /// `private static native byte[] decrypt(byte[])` and the body is in the
+    /// `.so`. We find the library that exports the JNI entry point, load its
+    /// executable segment, and run the AArch64 interpreter over it with the
+    /// Java arguments mapped into the flat address space.
+    pub(crate) fn call_native(
+        &mut self,
+        mr: &unhusk_dex::model::MethodRef,
+        args: &[crate::value::Value],
+    ) -> Option<crate::value::Value> {
+        if !self.policy.emulate_native {
+            return None;
+        }
+        if self.loaded_libraries.is_empty() && self.program.class_exists(&mr.class) {
+            // A native method in a class that never loaded a library: it may
+            // still be in a shipped .so, found by the JNI mangled name.
+        }
+        let jni_name = jni_symbol(&mr.class, &mr.name);
+        let libs = self.native_libraries.clone();
+        let mut found: Option<(String, Vec<u8>)> = None;
+        for (path, data) in &libs {
+            if elf_exports(data, &jni_name) {
+                found = Some((path.clone(), data.clone()));
+                break;
+            }
+        }
+        let (path, elf) = match found {
+            Some(f) => f,
+            None => {
+                self.emit(
+                    crate::events::EventKind::DynamicLoad,
+                    crate::events::Layer::Native,
+                    self.current_method_display(),
+                    mr.signature(),
+                    vec![format!("looked for export {jni_name} in {} library(ies)", libs.len())],
+                    Some("native method not resolvable to a shipped library".into()),
+                );
+                return None;
+            }
+        };
+        let entry = crate::native::aarch64::find_export(&elf, &jni_name);
+        let code = match entry
+            .and_then(|(file_off, _)| crate::native::aarch64::Code::from_elf_at(&elf, file_off))
+            .or_else(|| crate::native::aarch64::Code::from_elf(&elf))
+        {
+            Some(c) => (c.bytes.to_vec(), c.vaddr),
+            None => {
+                self.emit(
+                    crate::events::EventKind::DynamicLoad,
+                    crate::events::Layer::Native,
+                    self.current_method_display(),
+                    mr.signature(),
+                    vec![format!("{path}: no executable AArch64 segment")],
+                    Some("library is not an AArch64 executable".into()),
+                );
+                return None;
+            }
+        };
+        let (code_bytes, code_vaddr) = code;
+        // The segment was extracted starting at its own `p_offset`, so a
+        // virtual address maps to `mem_base + (va - segment_vaddr)`.
+        let entry_vaddr = entry.map(|(_, va)| va).unwrap_or(code_vaddr);
+
+        // Map arguments using the JNI calling convention:
+        //   x0 = JNIEnv*, x1 = jclass (static) or jobject (instance),
+        //   x2.. = the Java arguments in order.
+        //
+        // Arrays are modelled as raw pointers into the emulated address space.
+        // That is a deliberate simplification: a real stub fetches the element
+        // pointer with `GetByteArrayElements`, which we answer in the import
+        // table by returning the same buffer. Either route ends at the bytes
+        // the stub operates on, which is what matters for recovery.
+        let mut m = crate::native::aarch64::Machine::new(NativeLimits {
+            max_steps: self.policy.native_steps,
+        });
+        m.write_mem(m.mem_base, &code_bytes);
+        const ARENA: u64 = 0x1010_0000;
+        const HANDLES: u64 = 0x1018_0000;
+        let mut next = ARENA;
+        // (java heap object, native address, length) for every array argument,
+        // so writes can be copied back afterwards.
+        let mut handles: Vec<(u32, u64, usize)> = Vec::new();
+        for (i, a) in args.iter().enumerate().take(6) {
+            let slot = i + 2;
+            match a {
+                crate::value::Value::Obj(id) if *id != 0 => {
+                    let bytes = match self.heap.get(*id) {
+                        Some(crate::heap::Object::Array { bytes, .. }) => Some(bytes.clone()),
+                        Some(crate::heap::Object::Str { value, .. }) => {
+                            Some(value.clone().into_bytes())
+                        }
+                        _ => None,
+                    };
+                    match bytes {
+                        Some(b) => {
+                            m.write_mem(next, &b);
+                            handles.push((*id, next, b.len()));
+                            m.regs[slot] = next;
+                            next += (b.len() as u64 + 15) / 16 * 16 + 16;
+                        }
+                        None => m.regs[slot] = 0x7000_0000 + i as u64,
+                    }
+                }
+                crate::value::Value::Obj(_) => m.regs[slot] = 0,
+                v => m.regs[slot] = v.as_i64() as u64,
+            }
+        }
+        m.regs[0] = HANDLES;
+        m.regs[1] = 0x7000_0000;
+
+        let entry_off = entry_vaddr.saturating_sub(code_vaddr);
+        let outcome = m.run(m.mem_base + entry_off, &NativeLimits {
+            max_steps: self.policy.native_steps,
+        });
+        let steps = outcome.steps();
+        let detail = match &outcome {
+            NativeOutcome::Returned { .. } => "returned".to_string(),
+            NativeOutcome::Unsupported { pc, reason, .. } => {
+                format!("stopped at pc 0x{pc:x}: {reason}")
+            }
+            NativeOutcome::Budget { .. } => "step budget exhausted".to_string(),
+            NativeOutcome::Halted { reason, .. } => format!("halted: {reason}"),
+        };
+        let complete = outcome.is_complete();
+
+        // Write the possibly-modified argument buffers back into the Java
+        // heap objects. This is the crucial step for void-returning decryptors:
+        // the sample allocated `byte[] buf`, handed it to native code, and will
+        // now use it directly. Without the write-back the caller's array keeps
+        // its ciphertext and the unpacking chain stops here.
+        let mut recovered_here: Vec<(Vec<u8>, String)> = Vec::new();
+        for (id, addr, len) in handles.clone() {
+            let Some(written) = m.read_mem(addr, len).map(|b| b.to_vec()) else { continue };
+            if let Some(crate::heap::Object::Array { bytes, prov, .. }) = self.heap.get_mut(id) {
+                if bytes.len() == written.len() && bytes[..] != written[..] {
+                    bytes.copy_from_slice(&written);
+                    prov.add(crate::value::Tag::Decoded);
+                    prov.add(crate::value::Tag::Built);
+                }
+            }
+            if crate::crypto::looks_like_dex(&written) {
+                recovered_here.push((written, format!("native:{jni_name}")));
+            }
+        }
+        // Also check the whole arena tail for a DEX header, in case the stub
+        // allocated its own output buffer.
+        for off in (ARENA..next).step_by(16) {
+            if let Some(b) = m.read_mem(off, 8) {
+                if &b[..4] == b"dex\n" {
+                    let mut len = 0usize;
+                    if let Some(hdr) = m.read_mem(off, 32) {
+                        len = u32::from_le_bytes([hdr[8], hdr[9], hdr[10], hdr[11]]) as usize;
+                    }
+                    if len > 8 && len < 32 * 1024 * 1024 {
+                        if let Some(full) = m.read_mem(off, len) {
+                            if crate::crypto::looks_like_dex(full) {
+                                recovered_here.push((full.to_vec(), format!("native:{jni_name}@0x{off:x}")));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        self.emit(
+            crate::events::EventKind::DynamicLoad,
+            crate::events::Layer::Native,
+            self.current_method_display(),
+            mr.signature(),
+            vec![format!("{path} :: {jni_name}, {steps} steps")],
+            Some(if complete {
+                format!("native returned; {detail}{}", if recovered_here.is_empty() { String::new() } else { format!(", {} payload(s) produced", recovered_here.len()) })
+            } else {
+                format!("native emulation incomplete: {detail}")
+            }),
+        );
+        for (bytes, src) in recovered_here {
+            self.load_dex_from_bytes(bytes, src);
+        }
+
+        // Deliver a null/default: the return value of a native decryptor is
+        // almost always an array we have already inspected, and we cannot
+        // reconstruct a Java ByteArray from the AArch64 calling convention
+        // without the stub's own JNI calls.
+        None
+    }
+}
+
+/// Mangled JNI symbol for `class#method`.
+pub fn jni_symbol(class_desc: &str, name: &str) -> String {
+    let c = class_desc.trim_start_matches('L').trim_end_matches(';');
+    let mut s = String::with_capacity(c.len() + name.len() + 8);
+    s.push_str("Java_");
+    for ch in c.bytes() {
+        match ch {
+            b'/' => s.push('_'),
+            b'_' => s.push_str("_1"),
+            b';' => s.push_str("_2"),
+            b'[' => s.push_str("_3"),
+            b'.' => s.push('_'),
+            other => s.push(other as char),
+        }
+    }
+    s.push('_');
+    for ch in name.bytes() {
+        match ch {
+            b'_' => s.push_str("_1"),
+            other => s.push(other as char),
+        }
+    }
+    s
+}
+
+/// Does this ELF's dynamic symbol table contain `symbol`?
+fn elf_exports(data: &[u8], symbol: &str) -> bool {
+    // Cheap and robust enough: a JNI export name appears verbatim in .dynstr.
+    data.windows(symbol.len())
+        .any(|w| w == symbol.as_bytes())
+}

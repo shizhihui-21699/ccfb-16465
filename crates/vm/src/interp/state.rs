@@ -73,6 +73,8 @@ pub struct Policy {
     pub stop_on_first_payload: bool,
     /// Maximum iterations of any single loop head before we widen it.
     pub loop_unroll: u32,
+    /// AArch64 steps allowed per native call.
+    pub native_steps: u64,
 }
 
 impl Default for Policy {
@@ -85,6 +87,7 @@ impl Default for Policy {
             emulate_native: true,
             stop_on_first_payload: false,
             loop_unroll: 64,
+            native_steps: 2_000_000,
         }
     }
 }
@@ -126,6 +129,10 @@ pub struct Machine {
     pub class_states: std::collections::HashMap<String, crate::interp::classinit::ClassState>,
     /// Classes whose `<clinit>` is currently on the frame stack.
     pub init_stack: Vec<String>,
+    /// Native libraries available for dispatch: (apk path, bytes).
+    pub native_libraries: Vec<(String, Vec<u8>)>,
+    /// Libraries the sample explicitly loaded.
+    pub loaded_libraries: Vec<String>,
     /// Every method body entered at least once, so seeding never repeats work
     /// the sample already did itself.
     pub entered: std::collections::HashSet<MethodHandle>,

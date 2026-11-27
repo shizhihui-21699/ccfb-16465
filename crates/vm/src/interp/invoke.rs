@@ -85,7 +85,16 @@ impl Machine {
                     Err(r) => Err(r),
                 }
             }
-            Target::Native(mr) => self.handle_native_or_abstract(&mr, &args, is_wide(&mr), is_obj(&mr)),
+            Target::Native(mr) => {
+                // Try the real library first: if a shipped `.so` exports this
+                // JNI entry point we can run its decryptor, which is where most
+                // packers keep the payload cipher.
+                if let Some(v) = self.call_native(&mr, &args) {
+                    self.deliver_result(Some(v), &mr);
+                    return Ok(());
+                }
+                self.handle_native_or_abstract(&mr, &args, is_wide(&mr), is_obj(&mr))
+            }
             Target::Model(mr) => {
                 let (value, event) = self.call_model(&mr, &args);
                 if let Some(ev) = event {
