@@ -84,63 +84,6 @@ pub mod graph_impl {
         pub fn edge_count(&self) -> usize {
             self.edges.len()
         }
-
-        pub fn path_from(&self, roots: &[&str], depth: usize) -> Vec<(String, usize)> {
-            let mut seen: BTreeMap<String, usize> = BTreeMap::new();
-            let mut queue: Vec<(String, usize)> = Vec::new();
-            for r in roots {
-                if self.children.contains_key(*r) && !seen.contains_key(*r) {
-                    seen.insert(r.to_string(), 0);
-                    queue.push((r.to_string(), 0));
-                }
-            }
-            // If none of the declared roots executed, fall back to real roots.
-            if queue.is_empty() {
-                for r in self.roots.iter() {
-                    if !seen.contains_key(r) {
-                        seen.insert(r.clone(), 0);
-                        queue.push((r.clone(), 0));
-                    }
-                }
-            }
-            let mut out = Vec::new();
-            while let Some((m, d)) = queue.pop() {
-                out.push((m.clone(), d));
-                if d >= depth {
-                    continue;
-                }
-                for c in self.callees(&m) {
-                    if !seen.contains_key(c) {
-                        seen.insert(c.to_string(), d + 1);
-                        queue.push((c.to_string(), d + 1));
-                    }
-                }
-            }
-            out.sort_by_key(|(_, d)| *d);
-            out
-        }
-
-        pub fn callers_transitive(&self, method: &str, max_hops: usize) -> Vec<String> {
-            let mut out = Vec::new();
-            let mut frontier = vec![method.to_string()];
-            let mut seen: BTreeSet<String> = BTreeSet::new();
-            for _ in 0..max_hops {
-                let mut next = Vec::new();
-                for m in &frontier {
-                    for p in self.callers(m) {
-                        if seen.insert(p.to_string()) {
-                            out.push(p.to_string());
-                            next.push(p.to_string());
-                        }
-                    }
-                }
-                if next.is_empty() {
-                    break;
-                }
-                frontier = next;
-            }
-            out
-        }
     }
 }
 
