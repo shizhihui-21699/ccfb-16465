@@ -104,6 +104,7 @@ pub fn run(apk: &Apk, cfg: &PipelineConfig) -> Merged {
     let mut all_recovered: Vec<RecoveredDex> = Vec::new();
     let mut all_executed: Vec<String> = Vec::new();
     let mut all_requests = Vec::new();
+    let mut all_payloads: Vec<(String, Vec<u8>)> = Vec::new();
     let mut recovered_classes: Vec<String> = Vec::new();
     let mut total_insns = 0u64;
     let mut total_ms = 0u64;
@@ -136,10 +137,16 @@ pub fn run(apk: &Apk, cfg: &PipelineConfig) -> Merged {
         if a.trace().is_truncated() {
             truncated = true;
         }
-        // Merge recovered payloads by sha1; keep the first provenance.
+        // Merge recovered payloads by sha1; keep the first provenance and the
+        // bytes, so extraction does not have to re-run the sample.
         for r in a.recovered.iter() {
             if !all_recovered.iter().any(|x| x.sha1 == r.sha1) {
                 all_recovered.push(r.clone());
+            }
+        }
+        for (name, bytes) in a.machine.recovered_payloads.iter() {
+            if !all_payloads.iter().any(|(_, b)| b == bytes) {
+                all_payloads.push((name.clone(), bytes.clone()));
             }
         }
         for m in a.executed.iter() {
@@ -244,6 +251,7 @@ pub fn run(apk: &Apk, cfg: &PipelineConfig) -> Merged {
         executed: all_executed,
         requests: all_requests,
         checks: Default::default(),
+        recovered_payloads: all_payloads,
     };
 
     Merged {

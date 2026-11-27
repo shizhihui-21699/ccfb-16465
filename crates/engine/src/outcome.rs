@@ -27,6 +27,11 @@ pub struct Outcome {
     pub executed: Vec<String>,
     pub requests: Vec<RecordedRequest>,
     pub checks: std::collections::BTreeMap<String, String>,
+    /// Raw bytes of every DEX recovered during the run, in discovery order.
+    /// Kept off the wire (not serialised) because it can be large; extraction
+    /// and re-analysis read it from here.
+    #[serde(skip)]
+    pub recovered_payloads: Vec<(String, Vec<u8>)>,
 }
 
 impl Outcome {

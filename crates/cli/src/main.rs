@@ -132,10 +132,10 @@ fn main() -> ExitCode {
             let mut any_ok = false;
             for path in &apk {
                 match analyse_one(path, &cfg) {
-                    Ok(report) => {
+                    Ok((report, payloads)) => {
                         any_ok = true;
                         if let Some(dir) = &extract {
-                            if let Err(e) = extract_payloads(path, &cfg, dir) {
+                            if let Err(e) = write_payloads(&payloads, dir) {
                                 eprintln!("warning: extraction failed: {e}");
                             }
                         }
@@ -225,7 +225,7 @@ fn main() -> ExitCode {
             }
             for (path, r) in &results {
                 match r {
-                    Ok(report) => {
+                    Ok((report, _payloads)) => {
                         let sev = report
                             .findings
                             .first()
@@ -281,7 +281,7 @@ fn main() -> ExitCode {
                 verbose: false,
             };
             match analyse_one(&apk, &cfg) {
-                Ok(report) => {
+                Ok((report, _payloads)) => {
                     print!("{}", dot(&report));
                     ExitCode::SUCCESS
                 }
@@ -296,7 +296,10 @@ fn main() -> ExitCode {
 
 type BoxErr = Box<dyn std::error::Error + Send + Sync>;
 
-fn analyse_one(path: &Path, cfg: &PipelineConfig) -> Result<Report, BoxErr> {
+fn analyse_one(
+    path: &Path,
+    cfg: &PipelineConfig,
+) -> Result<(Report, Vec<(String, Vec<u8>)>), BoxErr> {
     let apk = unhusk_apk::Apk::open(path)?;
     let merged = pipeline::run(&apk, cfg);
     let o = &merged.outcome;
@@ -314,7 +317,7 @@ fn analyse_one(path: &Path, cfg: &PipelineConfig) -> Result<Report, BoxErr> {
         trace_truncated: o.trace.is_truncated(),
         classes_in_recovered: recovered_classes,
     };
-    Ok(input.build())
+    Ok((input.build(), o.recovered_payloads.clone()))
 }
 
 fn collect_recovered_classes(
@@ -326,19 +329,14 @@ fn collect_recovered_classes(
     Vec::new()
 }
 
-struct ExtractErr(String);
-
-impl std::fmt::Display for ExtractErr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-fn extract_payloads(path: &Path, cfg: &PipelineConfig, dir: &Path) -> Result<(), BoxErr> {
-    let apk = unhusk_apk::Apk::open(path)?;
-    let a = unhusk_vm::analysis::analyze(&apk, &analysis_config(cfg));
+/// Write the payloads recovered during an analysis run.
+///
+/// Deliberately does *not* re-run the sample: the bytes came out of the run
+/// whose report the analyst is reading, and a second pass could recover a
+/// different set under a different clock window.
+fn write_payloads(payloads: &[(String, Vec<u8>)], dir: &Path) -> Result<(), BoxErr> {
     std::fs::create_dir_all(dir)?;
-    for (name, bytes) in a.machine.recovered_payloads.iter() {
+    for (name, bytes) in payloads {
         let safe: String = name
             .chars()
             .map(|c| {
@@ -349,20 +347,15 @@ fn extract_payloads(path: &Path, cfg: &PipelineConfig, dir: &Path) -> Result<(),
                 }
             })
             .collect();
-        std::fs::write(dir.join(format!("{safe}.dex")), bytes)?;
-        println!("extracted {} -> {}/{}.dex", name, dir.display(), safe);
+        let file = if safe.ends_with(".dex") {
+            safe
+        } else {
+            format!("{safe}.dex")
+        };
+        std::fs::write(dir.join(&file), bytes)?;
+        println!("extracted {} -> {}", name, dir.join(&file).display());
     }
-    let _ = ExtractErr(String::new());
     Ok(())
-}
-
-fn analysis_config(cfg: &PipelineConfig) -> unhusk_vm::analysis::AnalysisConfig {
-    let mut c = unhusk_vm::analysis::AnalysisConfig::default();
-    c.policy.record_all_apis = cfg.verbose;
-    c.limits.max_instructions = 60_000_000;
-    c.limits.max_wall = std::time::Duration::from_millis(cfg.total_budget_ms.min(120_000));
-    c.keep_payloads = true;
-    c
 }
 
 fn triage_json(f: &unhusk_report::StaticFacts) -> serde_json::Value {
