@@ -599,9 +599,18 @@ impl Machine {
 
     fn java_system(&mut self, name: &str, args: &[Value]) -> CallResult {
         match name {
-            "currentTimeMillis" => CallResult::new(Some(Value::J(self.env.clock.now_ms())), Some(obs(Level::Routine, "time", "currentTimeMillis"))),
-            "nanoTime" => CallResult::new(Some(Value::J(self.env.clock.uptime_ms() * 1_000_000)), None),
-            "elapsedRealtime" => CallResult::new(Some(Value::J(self.env.clock.elapsed_realtime_ms())), None),
+            "currentTimeMillis" => CallResult::new(
+                Some(Value::J(self.env.clock.now_ms())),
+                Some(obs(Level::Notable, "time", "System.currentTimeMillis")),
+            ),
+            "nanoTime" => CallResult::new(
+                Some(Value::J(self.env.clock.uptime_ms() * 1_000_000)),
+                Some(obs(Level::Routine, "time", "System.nanoTime")),
+            ),
+            "elapsedRealtime" => CallResult::new(
+                Some(Value::J(self.env.clock.elapsed_realtime_ms())),
+                Some(obs(Level::Routine, "time", "SystemClock.elapsedRealtime")),
+            ),
             "getProperty" => {
                 let key = self.arg_str_or(args, 0);
                 let v = match key.as_str() {

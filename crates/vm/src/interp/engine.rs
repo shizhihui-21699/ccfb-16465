@@ -104,9 +104,38 @@ impl Machine {
             frame.regs[base + i] = v;
         }
         frame.result_to = result_to;
-        self.entered.insert(handle);
+        let first_entry = self.entered.insert(handle);
         self.frames.push(frame);
         self.methods_entered += 1;
+        if first_entry {
+            // One MethodEnter per method body, so the call graph records the
+            // first call site rather than a hot loop's last iteration.
+            let caller = if self.frames.len() >= 2 {
+                let parent = self.frames[self.frames.len() - 2].method;
+                self.program.method(parent).display()
+            } else {
+                "<entry>".to_string()
+            };
+            let callee = self.program.method(handle).display();
+            let (rec, insn) = (self.recovered.len(), self.budget.instructions);
+            self.trace.push(Event {
+                seq: 0,
+                insn,
+                kind: EventKind::MethodEnter,
+                layer: if self.program.origins[handle.dex as usize] == crate::interp::program::MethodOrigin::Recovered {
+                    Layer::RecoveredDex
+                } else {
+                    Layer::Dex
+                },
+                caller,
+                subject: callee,
+                args: Vec::new(),
+                result: None,
+                prov: None,
+                line: None,
+            });
+            let _ = rec;
+        }
         if self.methods_entered > self.budget.limits.max_methods {
             self.budget.stop(StopReason::Budget, "method entry limit");
             return Err(StopReason::Budget);

@@ -498,9 +498,10 @@ impl Machine {
 
     fn android_clock(&mut self, name: &str, _args: &[Value]) -> CallResult {
         match name {
-            "elapsedRealtime" | "uptimeMillis" | "currentThreadTimeMillis" => {
-                CallResult::new(Some(Value::J(self.env.clock.elapsed_realtime_ms())), None)
-            }
+            "elapsedRealtime" | "uptimeMillis" | "currentThreadTimeMillis" => CallResult::new(
+                Some(Value::J(self.env.clock.elapsed_realtime_ms())),
+                Some(obs(Level::Routine, "time", format!("SystemClock.{name}"))),
+            ),
             "setCurrentTimeMillis" => CallResult::new(Some(Value::I(1)), None),
             _ => CallResult::void(),
         }

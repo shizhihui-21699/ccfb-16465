@@ -8,5 +8,6 @@ license.workspace = true
 unhusk-dex.workspace = true
 unhusk-apk.workspace = true
 unhusk-vm.workspace = true
+unhusk-report.workspace = true
 serde.workspace = true
 thiserror.workspace = true

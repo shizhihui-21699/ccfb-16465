@@ -4,5 +4,6 @@
 //! strategy — while `unhusk-vm` owns execution semantics.
 
 pub mod outcome;
+pub mod pipeline;
 
 pub use outcome::{Outcome, RecoveredPayloadSummary};

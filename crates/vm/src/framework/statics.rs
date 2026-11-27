@@ -11,9 +11,13 @@ use crate::value::{Provenance, Tag, Value};
 impl Machine {
     /// Value of a framework static field. Returns `None` for fields we do not
     /// model, so the caller can fall back to the sample's own statics.
+    ///
+    /// Reads of `Build.*` are recorded as evasion evidence: they are the single
+    /// most common emulator test, and since they are field reads they would
+    /// otherwise never appear in the trace.
     pub(crate) fn framework_static(&mut self, class: &str, name: &str) -> Option<Value> {
         let c = class.trim_start_matches('L').trim_end_matches(';');
-        let p = &self.env.profile;
+        let p = self.env.profile.clone();
         let s = match (c, name) {
             ("android/os/Build", "MANUFACTURER") => p.manufacturer.clone(),
             ("android/os/Build", "BRAND") => p.brand.clone(),
@@ -33,7 +37,20 @@ impl Machine {
             ("android/os/Build", "RADIO") => p.radio.clone(),
             ("android/os/Build", "SERIAL") => p.serial.clone(),
             ("android/os/Build", "TIME") => return Some(Value::J(p.build_time)),
-            ("android/os/Build$VERSION", "SDK_INT") => return Some(Value::I(p.sdk_int)),
+            ("android/os/Build$VERSION", "SDK_INT") => {
+                let sdk = p.sdk_int;
+                if self.env.checks.insert("build.SDK_INT".into(), sdk.to_string()).is_none() {
+                    self.emit(
+                        crate::events::EventKind::Evasion,
+                        crate::events::Layer::Framework,
+                        self.current_method_display(),
+                        "android.os.Build$VERSION.SDK_INT".to_string(),
+                        vec![format!("SDK_INT = {sdk}")],
+                        Some("Build.VERSION.SDK_INT read".into()),
+                    );
+                }
+                return Some(Value::I(sdk));
+            }
             ("android/os/Build$VERSION", "RELEASE") => p.release.clone(),
             ("android/os/Build$VERSION", "CODENAME") => "REL".to_string(),
             ("android/os/Build$VERSION", "INCREMENTAL") => p.incremental.clone(),
@@ -56,9 +73,22 @@ impl Machine {
         if std::env::var("UNHUSK_DEBUG").is_ok() {
             eprintln!("    framework_static {c}.{name} = {s:?}");
         }
-        let v = self.new_string(s, Provenance::of(Tag::Device));
-        if std::env::var("UNHUSK_DEBUG").is_ok() {
-            eprintln!("      new_string => {v:?}");
+        let is_build = c == "android/os/Build";
+        let v = self.new_string(s.clone(), Provenance::of(Tag::Device));
+        if is_build {
+            let key = format!("build.{name}");
+            // One event per distinct property: a loop reading MODEL 500 times is
+            // one fact about the sample, not 500.
+            if self.env.checks.insert(key, s.clone()).is_none() {
+                self.emit(
+                    crate::events::EventKind::Evasion,
+                    crate::events::Layer::Framework,
+                    self.current_method_display(),
+                    format!("android.os.Build.{name}"),
+                    vec![format!("{name} = {s:?}")],
+                    Some(format!("Build.{name} read (profile {})", self.env.profile.name)),
+                );
+            }
         }
         Some(v)
     }

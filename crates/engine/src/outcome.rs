@@ -1,7 +1,6 @@
 //! The neutral, serialisable result of an analysis run.
 
 use serde::{Deserialize, Serialize};
-use unhusk_apk::Manifest;
 use unhusk_vm::env::RecordedRequest;
 use unhusk_vm::events::{Event, Trace};
 use unhusk_vm::interp::program::RecoveredDex;
@@ -49,12 +48,4 @@ impl Outcome {
     }
 }
 
-/// Static facts about the APK that the report cites.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StaticFacts {
-    pub manifest: Manifest,
-    pub dex_names: Vec<String>,
-    pub native_libs: Vec<String>,
-    pub packer_hits: Vec<(String, String)>,
-}
 

@@ -4,4 +4,17 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "unhusk"
+path = "src/main.rs"
+
 [dependencies]
+unhusk-dex.workspace = true
+unhusk-apk.workspace = true
+unhusk-vm.workspace = true
+unhusk-engine.workspace = true
+unhusk-report.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+walkdir.workspace = true
+rayon.workspace = true
