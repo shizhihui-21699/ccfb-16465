@@ -108,10 +108,19 @@ impl Machine {
 
     // -- type checks -------------------------------------------------------
 
+    /// `check-cast`.
+    ///
+    /// The conservative default is to *pass* the cast. Our object model is an
+    /// approximation — partial superclass chains, modelled framework types,
+    /// interfaces resolved loosely — and an incorrect ClassCastException here
+    /// aborts a legitimate run three frames deep in a third-party library.
+    /// That failure mode is much worse than the missed detection, because it
+    /// discards everything the sample might have done afterwards.
+    ///
+    /// The exception is thrown only where the model is certain: both classes
+    /// are declared in the program, and neither is an interface (interfaces
+    /// are widenings our hierarchy cannot rule out).
     pub(crate) fn op_check_cast(&mut self, insn: &Insn) -> Result<(), StopReason> {
-        // A null passes any cast. A non-null object whose class we know and
-        // that is provably unrelated would throw ClassCastException; samples
-        // rely on this to detect instrumentation, so we honour it.
         let Some(frame) = self.frames.last() else {
             return Ok(());
         };
@@ -130,23 +139,41 @@ impl Machine {
             .get(obj)
             .map(|o| o.class_name().to_string())
             .unwrap_or_default();
-        if class.is_empty() || class == target {
+        if class.is_empty() || class == target || class == "Ljava/lang/Object;" {
             return Ok(());
         }
-        // Arrays and interfaces are looser than our model can prove, so only
-        // reject when both sides are concrete classes in the program.
-        let both_concrete = class.starts_with('L') && target.starts_with('L');
-        if both_concrete
+        let both_in_program =
+            self.program.class_exists(&class) && self.program.class_exists(&target);
+        if both_in_program
             && !self.program.is_subclass_of(&class, &target)
             && !self.program.is_subclass_of(&target, &class)
-            && self.program.class_exists(&target)
+            && !self.class_is_interface(&class)
+            && !self.class_is_interface(&target)
         {
-            return self.throw_class(
-                "Ljava/lang/ClassCastException;",
-                format!("{class} -> {target}"),
+            // Record a provably-failing cast, but do not abort: see the note
+            // on this function. A real JVM would throw here, so the fact is
+            // worth reporting — a sample that relies on the exception is doing
+            // something unusual — but our object model is partial enough that
+            // aborting on it destroys far more signal than it produces.
+            let caller = self.current_method_display();
+            self.emit(
+                crate::events::EventKind::Policy,
+                crate::events::Layer::Sandbox,
+                caller,
+                "check-cast".into(),
+                vec![format!("{class} -> {target}")],
+                Some("cast would fail on a real device; execution continued".into()),
             );
+            return Ok(());
         }
         Ok(())
+    }
+
+    fn class_is_interface(&self, descriptor: &str) -> bool {
+        self.program
+            .find_class(descriptor)
+            .map(|(dex, ci)| self.program.class_at(dex, ci).is_interface())
+            .unwrap_or(true)
     }
 
     pub(crate) fn op_instance_of(&mut self, insn: &Insn) -> Result<(), StopReason> {
@@ -499,7 +526,9 @@ impl Machine {
         let arr = self.reg(insn.b);
         let idx = self.reg(insn.c).as_i32();
         let Some(id) = arr.as_obj() else {
-            return self.throw_class("Ljava/lang/NullPointerException;", "aget on null");
+            self.null_receiver("aget");
+            self.set_reg(insn.a, Value::I(0));
+            return Ok(());
         };
         if idx < 0 {
             return self.throw_class(
@@ -561,7 +590,8 @@ impl Machine {
         let arr = self.reg(insn.b);
         let idx = self.reg(insn.c).as_i32();
         let Some(id) = arr.as_obj() else {
-            return self.throw_class("Ljava/lang/NullPointerException;", "aput on null");
+            self.null_receiver("aput");
+            return Ok(());
         };
         if idx < 0 {
             return self.throw_class(
@@ -632,7 +662,9 @@ impl Machine {
     pub(crate) fn op_iget(&mut self, insn: &Insn) -> Result<(), StopReason> {
         let obj = self.reg(insn.b);
         let Some(id) = obj.as_obj() else {
-            return self.throw_class("Ljava/lang/NullPointerException;", "iget on null");
+            let v = self.null_receiver("iget");
+            self.set_reg(insn.a, v);
+            return Ok(());
         };
         let field = self.field_id_at(insn.c as u32);
         let value = match self.heap.get(id) {
@@ -659,7 +691,8 @@ impl Machine {
         let obj = self.reg(insn.b);
         let val = self.reg(insn.a);
         let Some(id) = obj.as_obj() else {
-            return self.throw_class("Ljava/lang/NullPointerException;", "iput on null");
+            self.null_receiver("iput");
+            return Ok(());
         };
         let field = self.field_id_at(insn.c as u32);
         if let Some(Object::Instance { fields, prov, .. }) = self.heap.get_mut(id) {

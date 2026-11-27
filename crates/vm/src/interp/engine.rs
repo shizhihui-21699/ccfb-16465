@@ -58,6 +58,7 @@ impl Machine {
             executed: Vec::new(),
             entered: Default::default(),
             pending_result: None,
+            null_derefs: Default::default(),
             native_libraries: Vec::new(),
             loaded_libraries: Vec::new(),
             class_states: Default::default(),
@@ -334,7 +335,37 @@ impl Machine {
         }
     }
 
-    /// Raise a modelled exception. Returns `Err` only when the machine stopped.
+    /// A `null` receiver on a field access.
+    ///
+    /// The same reasoning as `check-cast` applies: our framework model returns
+    /// defaults for methods it does not know, so `null` here usually means "the
+    /// model did not produce the object the sample expected", not "the sample
+    /// dereferenced null". Aborting loses the rest of the run; continuing with
+    /// a default keeps the trace alive. The event records the difference, and
+    /// the report surfaces the count as a caveat, so the reader is never told
+    /// the run was faithful when it was not.
+    pub(crate) fn null_receiver(&mut self, what: &str) -> Value {
+        let caller = self.current_method_display();
+        let pc = self.frames.last().map(|f| f.pc).unwrap_or(0);
+        let first = self
+            .null_derefs
+            .insert((caller.clone(), format!("{what}@{pc:x}")), ());
+        if first.is_none() && self.null_derefs.len() <= 64 {
+            self.emit(
+                crate::events::EventKind::Policy,
+                crate::events::Layer::Sandbox,
+                caller,
+                "null-receiver".into(),
+                vec![what.to_string()],
+                Some(format!(
+                    "{what} on a null object; continued with a default (the model did not supply the object)"
+                )),
+            );
+        }
+        Value::I(0)
+    }
+
+    /// Raise a modelled exception. Returns `Err` only when the machine stops.
     pub(crate) fn throw_class(
         &mut self,
         class: &str,

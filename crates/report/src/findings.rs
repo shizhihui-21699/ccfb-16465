@@ -440,16 +440,51 @@ fn probes(input: &ReportInput<'_>, graph: &crate::CallGraph, out: &mut Vec<Findi
         .filter(|e| e.subject.contains("File;->exists") || e.subject.contains("File;->canRead"))
         .copied()
         .collect();
-    let emu: Vec<&Event> = mutations
+    // Emulator detection is a *combination* of signals, not one read.
+    //
+    // Every Android app reads `Build.VERSION.SDK_INT` and compares it; treating
+    // that as evasion makes the rule fire on almost every real application.
+    // The distinguishing property is breadth: a sample that fingerprints the
+    // device reads several identifying properties, or probes sensors and build
+    // fields together. So the rule requires either a sensor probe, or enough
+    // *distinct identifying* Build reads to constitute a fingerprint.
+    let identifying_reads: std::collections::BTreeSet<&str> = mutations
         .iter()
-        .filter(|e| {
-            e.subject.starts_with("android.os.Build")
-                || e.subject.contains("getSensorList")
-                || e.subject.contains("getDefaultSensor")
-                || e.subject.contains("registerListener")
+        .filter(|e| e.subject.starts_with("android.os.Build."))
+        .filter_map(|e| e.subject.strip_prefix("android.os.Build."))
+        .filter(|name| {
+            !matches!(
+                *name,
+                "VERSION.SDK_INT"
+                    | "VERSION.RELEASE"
+                    | "VERSION.CODENAME"
+                    | "VERSION.INCREMENTAL"
+                    | "VERSION.PREVIEW_SDK_INT"
+                    | "TYPE"
+                    | "TAGS"
+            )
         })
-        .copied()
         .collect();
+    let sensor_probe = mutations.iter().any(|e| {
+        e.subject.contains("getSensorList")
+            || e.subject.contains("getDefaultSensor")
+            || e.subject.contains("registerListener")
+    });
+    let fingerprinting = identifying_reads.len() >= 3;
+    let emu: Vec<&Event> = if sensor_probe || fingerprinting {
+        mutations
+            .iter()
+            .filter(|e| {
+                e.subject.starts_with("android.os.Build")
+                    || e.subject.contains("getSensorList")
+                    || e.subject.contains("getDefaultSensor")
+                    || e.subject.contains("registerListener")
+            })
+            .copied()
+            .collect()
+    } else {
+        Vec::new()
+    };
     if !root.is_empty() {
         // The path probed is in the result text ("... path probe: /system/bin/su");
         // the argument is only the File object, which is useless to a reader.

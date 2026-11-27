@@ -231,14 +231,20 @@ impl<'a> ReportInput<'a> {
                 "{unmodelled} framework native method(s) were not modelled; their return value was a default, so any branch depending on it may have taken a path the real device would not"
             ));
         }
-        let unsupported = self
+        // Tolerated model gaps: casts that would have failed and null receivers.
+        // Both mean the *model* did not supply what the sample expected; saying
+        // so is what keeps a clean verdict honest.
+        let tolerated = self
             .events
             .iter()
-            .filter(|e| e.kind == EventKind::Policy && e.subject == "unsupported")
+            .filter(|e| {
+                e.kind == EventKind::Policy
+                    && (e.subject == "check-cast" || e.subject == "null-receiver")
+            })
             .count();
-        if unsupported > 0 {
+        if tolerated > 0 {
             caveats.push(format!(
-                "{unsupported} construct(s) stopped emulation early; see the stop reason above"
+                "{tolerated} operation(s) were continued past a point where the real device would have thrown (an unmodelled framework value). Branches after that point may differ from a real run."
             ));
         }
         let runtime_methods: std::collections::BTreeSet<String> = self

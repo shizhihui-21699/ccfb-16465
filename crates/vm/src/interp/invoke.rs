@@ -82,7 +82,6 @@ impl Machine {
                 // instruction, so we record the destination there.
                 let result_reg = self.next_move_result_reg();
                 let call_site = Some((frame_method, insn.pc));
-                self.budget.charge_dynamic_load();
                 match self.push_frame(
                     handle,
                     args.clone(),

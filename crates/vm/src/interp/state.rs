@@ -140,6 +140,8 @@ pub struct Machine {
     /// Result of an instruction that writes to the following `move-result`
     /// rather than to a register (filled-new-array).
     pub pending_result: Option<Value>,
+    /// Distinct (caller, site) pairs where a null receiver was tolerated.
+    pub null_derefs: std::collections::BTreeMap<(String, String), ()>,
     /// Every method body entered at least once, so seeding never repeats work
     /// the sample already did itself.
     pub entered: std::collections::HashSet<MethodHandle>,

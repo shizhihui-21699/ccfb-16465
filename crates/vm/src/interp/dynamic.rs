@@ -278,8 +278,13 @@ impl Machine {
         started
     }
 
-    /// `ClassLoader.loadClass` / reflection: recover the class if its defining
-    /// DEX has been loaded, then run it.
+    /// `ClassLoader.loadClass` / reflection: note the class, and run it only if
+    /// it came from a payload recovered at runtime.
+    ///
+    /// A reflective `forName`/`getDeclaredMethod` inside one of the app's *own*
+    /// shipped DEX files is a library doing normal work. Treating every one as
+    /// a dynamic load would both burn the budget on a benign app and inflate
+    /// the trace with launches the sample never requested.
     pub(crate) fn note_class_load(&mut self, name: &str) {
         let desc = if name.starts_with('L') {
             name.to_string()
@@ -288,7 +293,17 @@ impl Machine {
         };
         let exists = self.program.class_exists(&desc);
         if exists {
-            self.invoke_loaded_class(&desc);
+            let from_payload = self
+                .program
+                .find_class(&desc)
+                .map(|(dex, _)| {
+                    self.program.origins[dex as usize]
+                        == crate::interp::program::MethodOrigin::Recovered
+                })
+                .unwrap_or(false);
+            if from_payload {
+                self.invoke_loaded_class(&desc);
+            }
         } else {
             self.emit(
                 EventKind::DynamicLoad,
