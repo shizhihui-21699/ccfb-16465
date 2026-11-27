@@ -296,10 +296,11 @@ fn main() -> ExitCode {
 
 type BoxErr = Box<dyn std::error::Error + Send + Sync>;
 
-fn analyse_one(
-    path: &Path,
-    cfg: &PipelineConfig,
-) -> Result<(Report, Vec<(String, Vec<u8>)>), BoxErr> {
+/// A finished analysis: the report the analyst reads, plus the raw bytes of
+/// every payload recovered during the same run.
+type Analysed = (Report, Vec<(String, Vec<u8>)>);
+
+fn analyse_one(path: &Path, cfg: &PipelineConfig) -> Result<Analysed, BoxErr> {
     let apk = unhusk_apk::Apk::open(path)?;
     let merged = pipeline::run(&apk, cfg);
     let o = &merged.outcome;
