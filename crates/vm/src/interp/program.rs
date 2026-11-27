@@ -34,6 +34,8 @@ pub enum Recovery {
     Downloaded(String),
     /// Derived from an asset or resource entry.
     FromAsset(String),
+    /// Produced by a native routine in this library.
+    NativeExtracted(String),
 }
 
 pub struct Program {

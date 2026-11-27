@@ -35,7 +35,10 @@ impl Machine {
             self.budget.stop(StopReason::Budget, "recovered DEX limit");
             return;
         }
-        let name = format!("runtime:{}", source.rsplit("->").next().unwrap_or("payload").trim());
+        let name = format!(
+            "decoded@{:x}.dex",
+            self.budget.instructions
+        );
         self.recover_dex_bytes(data, name, Recovery::DecryptedInApk, source.to_string(), category);
     }
 
@@ -71,9 +74,10 @@ impl Machine {
             // A ZIP of classes*.dex (a nested APK/jar) is the other common form.
             if crate::crypto::looks_like_zip(&data) {
                 if let Some(inner) = self.dex_from_zip(&data) {
+                    let base = normalized.rsplit('/').next().unwrap_or(&normalized).to_string();
                     self.recover_dex_bytes(
                         inner,
-                        format!("zip:{path}"),
+                        format!("{base}!"),
                         Recovery::WrittenToDisk(normalized),
                         format!("{loader}({path})"),
                         "load",
@@ -91,9 +95,10 @@ impl Machine {
             );
             return;
         }
+        let base = normalized.rsplit('/').next().unwrap_or(&normalized).to_string();
         self.recover_dex_bytes(
             data,
-            format!("file:{path}"),
+            base,
             Recovery::WrittenToDisk(normalized),
             format!("{loader}({path})"),
             "load",
@@ -494,7 +499,53 @@ impl Machine {
             }),
         );
         for (bytes, src) in recovered_here {
-            self.load_dex_from_bytes(bytes, src);
+            // The payload came out of this library, so record it as such rather
+            // than as something downloaded.
+            self.budget.charge_dynamic_load();
+            let seq = self.trace.seq;
+            use sha1::{Digest, Sha1};
+            let mut h = Sha1::new();
+            h.update(&bytes);
+            let sha1 = h.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>();
+            match unhusk_dex::parse(&bytes) {
+                Ok(dex) => {
+                    let classes = dex.classes.len();
+                    let methods = dex.all_methods().len();
+                    // Name it after the library, which is what the analyst
+                    // needs to point at; the mangled symbol is in the event.
+                    let lib_base = path.rsplit('/').next().unwrap_or(&path).to_string();
+                    let name = format!("{lib_base}::{jni_name}.dex");
+                    self.recovered.push(crate::interp::program::RecoveredDex {
+                        name: name.clone(),
+                        sha1: sha1.clone(),
+                        size: bytes.len(),
+                        classes,
+                        recovery: crate::interp::program::Recovery::NativeExtracted(path.clone()),
+                        event_seq: seq,
+                    });
+                    self.recovered_payloads.push((name.clone(), bytes.clone()));
+                    let dex_idx = self.program.add_dex(
+                        dex,
+                        Some(crate::interp::program::Recovery::NativeExtracted(path.clone())),
+                    );
+                    self.emit(
+                        crate::events::EventKind::DynamicLoad,
+                        crate::events::Layer::RecoveredDex,
+                        self.current_method_display(),
+                        format!("{path} :: {jni_name}"),
+                        vec![format!("{name} ({classes} classes, {methods} methods, sha1 {sha1})")],
+                        Some(format!("recovered DEX added as dex#{dex_idx}")),
+                    );
+                }
+                Err(e) => self.emit(
+                    crate::events::EventKind::DynamicLoad,
+                    crate::events::Layer::Native,
+                    self.current_method_display(),
+                    format!("{path} :: {jni_name}"),
+                    vec![format!("{src} ({} bytes, sha1 {sha1})", bytes.len())],
+                    Some(format!("native output rejected as DEX: {e}")),
+                ),
+            }
         }
 
         // Deliver a null/default: the return value of a native decryptor is
