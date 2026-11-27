@@ -30,10 +30,11 @@ def javac(src: Path, out: Path):
     files = [str(p) for p in src.rglob("*.java")]
     run([JAVA_HOME + "/bin/javac", "--release", "11", "-nowarn", "-d", out, "-cp", PLATFORM, *files])
 
-def d8(cls: Path, out: Path, extra=()):
+def d8(cls: Path, out: Path, min_api: int = 21, extra=()):
     out.mkdir(parents=True, exist_ok=True)
     classes = [str(p) for p in cls.rglob("*.class")]
-    run([BT / "d8", "--release", "--min-api", "21", "--lib", PLATFORM, "--output", out, *extra, *classes])
+    run([BT / "d8", "--release", "--min-api", str(min_api), "--lib", PLATFORM,
+         "--output", out, *extra, *classes])
 
 def manifest_bin(manifest: Path, out: Path):
     """Compile the XML manifest to binary AXML via aapt2, then extract it.
@@ -112,7 +113,20 @@ def main():
         {"lib/arm64-v8a/libdecrypt.so": FIX / "native" / "libdecrypt.so"},
     )
 
-    # 4. evasive: uses android.os.Build and java.io.File probes.
+    # 4. lambda: invoke-custom / LambdaMetafactory, which needs call-site id
+    #    support (DEX 038+) to analyse at all.
+    w = WORK / "lambda"
+    javac(FIX / "src" / "lambda", w / "cls")
+    # min-api 26 keeps lambdas as `invoke-custom` call sites instead of
+    # desugaring them into anonymous classes, which is what production apps
+    # built for modern Android contain.
+    # `--no-desugaring` is what preserves call sites: the default path rewrites
+    # lambdas into anonymous classes, which is not what a modern app ships.
+    d8(w / "cls", w / "dex", min_api=26, extra=("--no-desugaring",))
+    manifest_bin(FIX / "manifest" / "lambda.xml", w / "AndroidManifest.xml")
+    make_apk("lambda", w / "dex" / "classes.dex", w / "AndroidManifest.xml")
+
+    # 5. evasive: uses android.os.Build and java.io.File probes.
     w = WORK / "evasive"
     javac(FIX / "src" / "evasive", w / "cls")
     d8(w / "cls", w / "dex")

@@ -216,6 +216,31 @@ impl<'a> ReportInput<'a> {
         if self.recovered.is_empty() && !self.classes_in_recovered.is_empty() {
             caveats.push("no runtime payload was recovered".to_string());
         }
+        // A framework method we did not model is a coverage gap the reader must
+        // know about: the sample may branch on a value we returned as a default.
+        let unmodelled = self
+            .events
+            .iter()
+            .filter(|e| {
+                e.layer == Layer::Native
+                    && e.result.as_deref() == Some("native method (not emulated)")
+            })
+            .count();
+        if unmodelled > 0 {
+            caveats.push(format!(
+                "{unmodelled} framework native method(s) were not modelled; their return value was a default, so any branch depending on it may have taken a path the real device would not"
+            ));
+        }
+        let unsupported = self
+            .events
+            .iter()
+            .filter(|e| e.kind == EventKind::Policy && e.subject == "unsupported")
+            .count();
+        if unsupported > 0 {
+            caveats.push(format!(
+                "{unsupported} construct(s) stopped emulation early; see the stop reason above"
+            ));
+        }
         let runtime_methods: std::collections::BTreeSet<String> = self
             .events
             .iter()

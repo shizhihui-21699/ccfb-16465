@@ -298,6 +298,36 @@ impl Class {
     }
 }
 
+/// A `method_handle_item`: what kind of member it names and which one.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MethodHandleItem {
+    pub kind: u16,
+    pub member: u16,
+}
+
+impl MethodHandleItem {
+    pub const STATIC_PUT: u16 = 0x00;
+    pub const STATIC_GET: u16 = 0x01;
+    pub const INSTANCE_PUT: u16 = 0x02;
+    pub const INSTANCE_GET: u16 = 0x03;
+    pub const INVOKE_STATIC: u16 = 0x04;
+    pub const INVOKE_INSTANCE: u16 = 0x05;
+    pub const INVOKE_CONSTRUCTOR: u16 = 0x06;
+    pub const INVOKE_DIRECT: u16 = 0x07;
+    pub const INVOKE_INTERFACE: u16 = 0x08;
+
+    pub fn is_field(&self) -> bool {
+        self.kind <= Self::INSTANCE_GET
+    }
+}
+
+/// A `call_site_id_item`: the bootstrap method and its static arguments.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CallSite {
+    pub bootstrap: Option<MethodHandleItem>,
+    pub args: Vec<EncodedValue>,
+}
+
 /// A parsed DEX file. Tables are owned; cross references are indices into them.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DexFile {
@@ -308,6 +338,10 @@ pub struct DexFile {
     pub fields: Vec<FieldRef>,
     pub methods: Vec<MethodRef>,
     pub classes: Vec<Class>,
+    /// `method_handles` and `call_site_ids`, needed for `invoke-custom` (lambdas)
+    /// and `MethodHandle.invoke`. Empty for DEX files that do not use them.
+    pub method_handles: Vec<MethodHandleItem>,
+    pub call_sites: Vec<CallSite>,
     /// sha1 of the encoded file, used as a stable identity for extracted payloads.
     pub sha1: String,
     pub file_size: u32,
@@ -407,7 +441,7 @@ pub fn parse(data: &[u8]) -> Result<DexFile> {
     }
     let _link_size = r.u32()?;
     let _link_off = r.u32()?;
-    let _map_off = r.u32()?;
+    let map_off = r.u32()?;
     let string_ids_size = r.u32()?;
     let string_ids_off = r.u32()?;
     let type_ids_size = r.u32()?;
@@ -606,9 +640,13 @@ pub fn parse(data: &[u8]) -> Result<DexFile> {
         });
     }
 
+    let (method_handles, call_sites) = p.parse_call_sites(map_off)?;
+
     let sha1 = sha1_hex(data);
     Ok(DexFile {
         version,
+        method_handles,
+        call_sites,
         strings: p.strings,
         types: p.types,
         protos: p.protos,
@@ -860,6 +898,64 @@ impl<'a> Parser<'a> {
             line_table,
             pc_index,
         })
+    }
+
+    /// Parse `method_handles` and `call_site_ids` via the map list.
+    fn parse_call_sites(&self, map_off: u32) -> Result<(Vec<MethodHandleItem>, Vec<CallSite>)> {
+        if map_off == 0 {
+            return Ok((Vec::new(), Vec::new()));
+        }
+        let mut r = Reader::at(self.raw, map_off as usize)?;
+        let count = r.u32()?;
+        let mut handles_off = None;
+        let mut handles_size = 0u32;
+        let mut sites_off = None;
+        let mut sites_size = 0u32;
+        for _ in 0..count.min(64) {
+            let ty = r.u16()?;
+            let _unused = r.u16()?;
+            let size = r.u32()?;
+            let off = r.u32()?;
+            match ty {
+                0x0008 => {
+                    handles_off = Some(off);
+                    handles_size = size;
+                }
+                0x0007 => {
+                    sites_off = Some(off);
+                    sites_size = size;
+                }
+                _ => {}
+            }
+        }
+        let mut handles = Vec::new();
+        if let Some(off) = handles_off {
+            // method_handle_item: kind u16, unused u16, member u16, unused u16
+            for i in 0..handles_size.min(1 << 20) {
+                let mut hr = Reader::at(self.raw, off as usize + i as usize * 8)?;
+                let kind = hr.u16()?;
+                let _ = hr.u16()?;
+                let member = hr.u16()?;
+                handles.push(MethodHandleItem { kind, member });
+            }
+        }
+        let mut sites = Vec::new();
+        if let Some(off) = sites_off {
+            for i in 0..sites_size.min(1 << 20) {
+                let data_off = Reader::at(self.raw, off as usize + i as usize * 4)?.u32()?;
+                let values = self.parse_encoded_array(data_off).unwrap_or_default();
+                let mut it = values.into_iter();
+                let bootstrap = match it.next() {
+                    Some(EncodedValue::MethodHandle(idx)) => handles.get(idx as usize).cloned(),
+                    _ => None,
+                };
+                sites.push(CallSite {
+                    bootstrap,
+                    args: it.collect(),
+                });
+            }
+        }
+        Ok((handles, sites))
     }
 
     fn parse_encoded_array(&self, off: u32) -> Result<Vec<EncodedValue>> {

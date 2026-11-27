@@ -123,6 +123,39 @@ fn native_decryptor_payload_is_recovered_and_executed() {
 }
 
 #[test]
+fn lambda_call_sites_are_followed() {
+    // `invoke-custom` call sites name their implementation through a bootstrap
+    // method handle. A VM that cannot read call-site ids sees an empty program.
+    let f = analyse("lambda");
+    let executed: Vec<&str> = f
+        .outcome
+        .trace
+        .events
+        .iter()
+        .filter(|e| e.kind == EventKind::MethodEnter)
+        .map(|e| e.subject.as_str())
+        .collect();
+    assert!(
+        executed.iter().any(|m| m.contains("increment")),
+        "the lambda body must run; executed: {executed:?}"
+    );
+    assert!(
+        executed.iter().any(|m| m.contains("doubler")),
+        "both lambdas must run; executed: {executed:?}"
+    );
+    // Following a lambda is not evidence of malice.
+    assert!(
+        f.report.findings.is_empty(),
+        "findings: {:?}",
+        f.report
+            .findings
+            .iter()
+            .map(|x| x.title.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn profile_comparison_shows_the_evasion_signal() {
     let f = analyse("evasive");
     let emu = f
@@ -141,7 +174,7 @@ fn profile_comparison_shows_the_evasion_signal() {
 
 #[test]
 fn report_renders_without_panicking_on_all_fixtures() {
-    for name in ["hello", "packer", "native", "evasive"] {
+    for name in ["hello", "packer", "native", "lambda", "evasive"] {
         let f = analyse(name);
         let text = render_text(&f.report, true);
         assert!(text.contains("VERDICT"), "{name}: {text}");

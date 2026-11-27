@@ -470,17 +470,14 @@ impl Machine {
             0xb0..=0xcf => self.op_binop_2addr(insn),
             0xd0..=0xd7 => self.op_binop_lit16(insn),
             0xd8..=0xe2 => self.op_binop_lit8(insn),
-            // Unsupported for now (invoke-polymorphic/custom, method handles).
-            0xfa..=0xff => {
-                self.budget.stop(
-                    StopReason::Unsupported,
-                    format!(
-                        "opcode 0x{:02x} ({}) is not modelled",
-                        insn.op,
-                        insn.mnemonic()
-                    ),
-                );
-                Err(StopReason::Unsupported)
+            // Method-handle and call-site opcodes.
+            0xfa | 0xfb => self.op_invoke(insn), // invoke-polymorphic
+            0xfc | 0xfd => self.op_invoke(insn), // invoke-custom
+            0xfe => self.op_const_method_handle(insn),
+            0xff => {
+                // const-method-type: no modelled API consumes the descriptor.
+                self.set_reg(insn.a, Value::NULL);
+                Ok(())
             }
             other => {
                 self.budget.stop(

@@ -192,11 +192,22 @@ fn call_path(graph: &crate::CallGraph, method: &str) -> Vec<String> {
 
 /// A DEX that only exists at runtime was recovered and executed.
 fn runtime_payload(input: &ReportInput<'_>, graph: &crate::CallGraph, out: &mut Vec<Finding>) {
-    let loads: Vec<&Event> = input
-        .events
-        .iter()
-        .filter(|e| e.kind == EventKind::DynamicLoad)
-        .collect();
+    // Only classloader-shaped events count as "dynamic code loading". A
+    // `native method not emulated` note or a lambda call site is not.
+    let is_loader_event = |e: &Event| {
+        e.kind == EventKind::DynamicLoad
+            && (e.subject.contains("ClassLoader")
+                || e.subject.contains("loadClass")
+                || e.subject.contains("loadDex")
+                || e.subject.contains("loadLibrary")
+                || e.subject.contains("Method.invoke")
+                || e.layer == Layer::RecoveredDex
+                || e.result
+                    .as_deref()
+                    .map(|r| r.contains("recovered DEX"))
+                    .unwrap_or(false))
+    };
+    let loads: Vec<&Event> = input.events.iter().filter(|e| is_loader_event(e)).collect();
     if loads.is_empty() && input.recovered.is_empty() {
         return;
     }
@@ -552,13 +563,12 @@ fn time_gates(input: &ReportInput<'_>, graph: &crate::CallGraph, out: &mut Vec<F
 }
 
 fn native(input: &ReportInput<'_>, graph: &crate::CallGraph, out: &mut Vec<Finding>) {
+    // Loading a library is a finding; a *framework* native we could not model
+    // is a coverage gap, not sample behaviour, and belongs in the caveats.
     let hits: Vec<&Event> = input
         .events
         .iter()
-        .filter(|e| {
-            (e.kind == EventKind::DynamicLoad && e.subject.contains("loadLibrary"))
-                || (e.layer == Layer::Native && e.subject.contains("native method"))
-        })
+        .filter(|e| e.kind == EventKind::DynamicLoad && e.subject.contains("loadLibrary"))
         .collect();
     if hits.is_empty() {
         return;

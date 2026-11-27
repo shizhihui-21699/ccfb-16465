@@ -48,6 +48,8 @@ pub struct Program {
     method_map: HashMap<String, MethodHandle>,
     /// (descriptor, name) -> handles, for virtual dispatch without a proto.
     by_name: HashMap<(String, String), Vec<MethodHandle>>,
+    /// Lambda call-site tables, one per DEX.
+    call_sites: Vec<Vec<unhusk_dex::model::CallSite>>,
     /// Canonical signatures seen, for stable ordering in reports.
     pub signature_cache: HashMap<MethodHandle, String>,
     /// Field signature interning: `Lcls;->name:Type` -> dense id.
@@ -67,6 +69,7 @@ impl Program {
             class_map: HashMap::new(),
             method_map: HashMap::new(),
             by_name: HashMap::new(),
+            call_sites: Vec::new(),
             signature_cache: HashMap::new(),
             field_ids: HashMap::new(),
             field_names: Vec::new(),
@@ -157,6 +160,7 @@ impl Program {
                 self.signature_cache.insert(handle, sig);
             }
         }
+        self.call_sites.push(dex.call_sites.clone());
         self.dexes.push(dex);
         self.origins.push(origin);
         self.recoveries.push(recovery);
@@ -179,6 +183,42 @@ impl Program {
         } else {
             &class.data.virtual_methods[h.slot as usize - n_direct]
         }
+    }
+
+    /// The bootstrap target of call site `idx` in `dex`, resolved to a method
+    /// signature like `Ljava/lang/invoke/LambdaMetafactory;->metafactory(...)`.
+    ///
+    /// Lambda bootstraps name the *implementation* method in their static
+    /// arguments, so this is what makes a lambda callable without executing
+    /// the metafactory itself.
+    pub fn call_site(&self, dex: u32, idx: u32) -> Option<&unhusk_dex::model::CallSite> {
+        self.call_sites.get(dex as usize)?.get(idx as usize)
+    }
+
+    /// The method a lambda call site ultimately invokes, if it can be
+    /// determined statically (the usual LambdaMetafactory shape).
+    pub fn lambda_impl(&self, dex: u32, idx: u32) -> Option<unhusk_dex::model::MethodRef> {
+        let site = self.call_site(dex, idx)?;
+        let d = self.dex(dex);
+        // Static arguments, in order: samMethodType (MethodType), implMethod
+        // (a MethodHandle), instantiatedMethodType (MethodType).
+        for a in &site.args {
+            match a {
+                // The usual shape: a method handle naming the lambda body.
+                unhusk_dex::EncodedValue::MethodHandle(h) => {
+                    let item = d.method_handles.get(*h as usize)?;
+                    if item.is_field() {
+                        continue;
+                    }
+                    return d.method_at(item.member as u32).cloned();
+                }
+                // A plain method reference, seen when a tool writes the
+                // bootstrap arguments directly.
+                unhusk_dex::EncodedValue::Method(m) => return Some(m.clone()),
+                _ => {}
+            }
+        }
+        None
     }
 
     pub fn descriptor_of(&self, dex: u32, class: u32) -> &str {

@@ -63,6 +63,49 @@ impl Machine {
         }
     }
 
+    /// `const-method-handle` / `const-method-type`: produce a model object the
+    /// `MethodHandle` handler can dispatch through.
+    pub(crate) fn op_const_method_handle(&mut self, insn: &Insn) -> Result<(), StopReason> {
+        let Some(frame) = self.frames.last() else {
+            return Ok(());
+        };
+        let dex = frame.method.dex;
+        let idx = insn.b as u32;
+        let handle = self
+            .program
+            .dex(dex)
+            .method_handles
+            .get(idx as usize)
+            .cloned();
+        let Some(h) = handle else { return Ok(()) };
+        let member = if h.is_field() {
+            self.program
+                .dex(dex)
+                .field_at(h.member as u32)
+                .map(|f| f.signature())
+                .unwrap_or_default()
+        } else {
+            self.program
+                .dex(dex)
+                .method_at(h.member as u32)
+                .map(|m| m.signature())
+                .unwrap_or_default()
+        };
+        let v = match self.heap.new_model(
+            "Ljava/lang/invoke/MethodHandle;",
+            Provenance::of(Tag::Constant),
+        ) {
+            Some(id) => {
+                self.set_model_field(id, "member", crate::heap::ObjectValue::Str(member));
+                self.set_model_field(id, "kind", crate::heap::ObjectValue::Int(h.kind as i64));
+                Value::obj(id)
+            }
+            None => Value::NULL,
+        };
+        self.set_reg(insn.a, v);
+        Ok(())
+    }
+
     // -- type checks -------------------------------------------------------
 
     pub(crate) fn op_check_cast(&mut self, insn: &Insn) -> Result<(), StopReason> {

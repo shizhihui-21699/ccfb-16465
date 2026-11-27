@@ -21,6 +21,7 @@ impl Machine {
             "java/lang/Object" => self.java_object(name, args),
             "java/lang/Class" => self.java_class(name, args),
             "java/lang/ClassLoader" => self.java_class_loader(name, args),
+            "java/lang/invoke/MethodHandle" => self.java_method_handle(name, args),
             "dalvik/system/DexClassLoader"
             | "dalvik/system/PathClassLoader"
             | "dalvik/system/InMemoryDexClassLoader"
@@ -1603,4 +1604,55 @@ fn apply_cipher(alg: &str, mode: i32, key: &[u8], iv: &[u8], data: &[u8]) -> (Ve
     }
     // Android's "AES" fallback is handled above; anything else is unsupported.
     (data.to_vec(), false)
+}
+
+impl Machine {
+    /// `MethodHandle.invoke` / `invokeExact`.
+    ///
+    /// A MethodHandle object names a member (a method or field) with an access
+    /// kind. When the sample invokes it we dispatch to that member directly,
+    /// which is what makes reflective and lambda machinery reachable.
+    fn java_method_handle(&mut self, name: &str, args: &[Value]) -> CallResult {
+        match name {
+            "invoke" | "invokeExact" | "invokeWithArguments" => {
+                let Some(handle_id) = self.arg_obj(args, 0) else {
+                    return CallResult::obj(Value::NULL);
+                };
+                let desc = self.model_string(handle_id, "member").unwrap_or_default();
+                let kind = self
+                    .model_field(handle_id, "kind")
+                    .map(|v| v.as_i64())
+                    .unwrap_or(-1);
+                let call_args: Vec<Value> = args.iter().skip(1).copied().collect();
+                let o = obs(
+                    Level::Notable,
+                    "reflect",
+                    format!("MethodHandle.invoke -> {desc}"),
+                );
+                if desc.is_empty() {
+                    return CallResult::new(Some(Value::NULL), Some(o));
+                }
+                // The stored form is `Class->name(params)ret`.
+                if let Some((class, rest)) = desc.split_once("->") {
+                    if let Some((mname, _sig)) = rest.split_once('(') {
+                        if let Some(h) = self.program.methods_named(class, mname).first().copied() {
+                            if self.program.method(h).code.is_some() {
+                                let reg = self.next_move_result_reg_pub();
+                                let _ = self.push_frame(
+                                    h,
+                                    call_args,
+                                    None,
+                                    reg.map(|r| (r, false, true)),
+                                );
+                                return CallResult::new(None, Some(o));
+                            }
+                        }
+                    }
+                }
+                let _ = kind;
+                CallResult::new(Some(Value::NULL), Some(o))
+            }
+            _ => CallResult::void(),
+        }
+    }
 }

@@ -53,6 +53,12 @@ impl Machine {
         // Capture the caller before dispatch: a modelled handler may push a
         // frame (reflective calls do), and the event must name the *invoker*.
         let caller_display = self.current_method_display();
+        // `invoke-custom` (0xfc/0xfd): a lambda or string-concat call site.
+        // The bootstrap method's static arguments name the real implementation,
+        // so we call that directly rather than executing LambdaMetafactory.
+        if kind == 0xfc || kind == 0xfd {
+            return self.op_invoke_custom(insn, &method_ref, &caller_display);
+        }
         // A static invocation is an active use of the target class.
         if (kind == 0x71 || kind == 0x77)
             && self.program.class_exists(&method_ref.class)
@@ -276,4 +282,142 @@ pub fn is_bootstrap_class(class: &str) -> bool {
         || c.starts_with("org/xml/")
         || c.starts_with("kotlin/")
         || c.starts_with("kotlinx/")
+}
+
+impl Machine {
+    /// Execute an `invoke-custom` call site.
+    ///
+    /// Two bootstraps matter in practice:
+    ///
+    ///  * `LambdaMetafactory` — the call site's static arguments contain the
+    ///    method reference that is the lambda body. We call that method with
+    ///    the captured values prepended.
+    ///  * `StringConcatFactory` — the arguments are joined in order. This is
+    ///    what `"a" + b` compiles to on modern d8, so getting it right keeps
+    ///    strings assembled at runtime visible to provenance tracking.
+    ///
+    /// Any other bootstrap is reported and skipped: guessing its semantics
+    /// would put invented behaviour in the trace.
+    fn op_invoke_custom(
+        &mut self,
+        insn: &unhusk_dex::insn::Insn,
+        site_ref: &unhusk_dex::model::MethodRef,
+        caller: &str,
+    ) -> Result<(), StopReason> {
+        let Some(frame_method) = self.frames.last().map(|f| f.method) else {
+            return Ok(());
+        };
+        let dex = frame_method.dex;
+        let args = self.invoke_args(insn);
+        let site_idx = insn.b as u32;
+        let call_site = self.program.call_site(dex, site_idx).cloned();
+        let bootstrap_class = call_site
+            .as_ref()
+            .and_then(|c| c.bootstrap.as_ref())
+            .and_then(|b| self.program.dex(dex).method_at(b.member as u32).cloned())
+            .map(|m| m.class)
+            .unwrap_or_else(|| site_ref.class.clone());
+
+        if bootstrap_class.contains("LambdaMetafactory") {
+            let Some(impl_ref) = self.program.lambda_impl(dex, site_idx) else {
+                self.budget.stop(
+                    StopReason::Unsupported,
+                    format!("lambda call site {site_idx} has no implMethod"),
+                );
+                return Err(StopReason::Unsupported);
+            };
+            // Resolve the implementation. A static method reference (the common
+            // case for non-capturing lambdas) is called with the capture list
+            // followed by the SAM arguments.
+            let target = self
+                .program
+                .find_method_in_class(
+                    &impl_ref.class,
+                    &impl_ref.name,
+                    &impl_ref.proto.params,
+                    &impl_ref.proto.return_type,
+                )
+                .or_else(|| {
+                    self.program
+                        .methods_named(&impl_ref.class, &impl_ref.name)
+                        .first()
+                        .copied()
+                });
+            match target {
+                Some(h) if self.program.method(h).code.is_some() => {
+                    let wide = matches!(impl_ref.proto.return_type.as_str(), "J" | "D");
+                    let obj = impl_ref.proto.return_type.starts_with('L')
+                        || impl_ref.proto.return_type.starts_with('[');
+                    let result_reg = self.next_move_result_reg();
+                    // A lambda is ordinary control flow inside the shipped
+                    // DEX, not dynamically loaded code: report it as an API
+                    // call so it does not masquerade as a packer signal.
+                    self.emit(
+                        crate::events::EventKind::ApiCall,
+                        crate::events::Layer::Dex,
+                        caller.to_string(),
+                        impl_ref.signature(),
+                        vec![format!("lambda call site {site_idx}")],
+                        Some("lambda body invoked through its call site".into()),
+                    );
+                    // Captured values become leading arguments.
+                    let mut call_args = args.clone();
+                    let want = self.program.method(h).proto.params.len();
+                    call_args.resize(want, crate::value::Value::NULL);
+                    let site = Some((frame_method, insn.pc));
+                    match self.push_frame(h, call_args, site, result_reg.map(|r| (r, wide, obj))) {
+                        Ok(()) => Ok(()),
+                        Err(r) => Err(r),
+                    }
+                }
+                _ => {
+                    self.budget.stop(
+                        StopReason::Unsupported,
+                        format!(
+                            "lambda impl {} not present in the program",
+                            impl_ref.signature()
+                        ),
+                    );
+                    Err(StopReason::Unsupported)
+                }
+            }
+        } else if bootstrap_class.contains("StringConcatFactory") {
+            // Every argument is converted to its string form and joined; the
+            // recipes are constants we cannot see, so plain concatenation is
+            // the honest approximation, and it preserves provenance.
+            let mut out = String::new();
+            let mut prov = crate::value::Provenance::default();
+            for (i, a) in args.iter().enumerate() {
+                if i > 0 {
+                    // Nothing: recipes control separators, and reporting a
+                    // joined string is what a reader expects.
+                }
+                out.push_str(&self.render_value(*a));
+                if let Some(id) = a.as_obj() {
+                    if let Some(p) = self.heap.get(id).and_then(|o| o.prov()) {
+                        prov.merge(p);
+                    }
+                }
+            }
+            prov.add(crate::value::Tag::Built);
+            if let Some(reg) = self.next_move_result_reg() {
+                let v = self.new_string(out, prov);
+                self.set_reg(reg, v);
+            }
+            Ok(())
+        } else {
+            self.emit(
+                crate::events::EventKind::DynamicLoad,
+                crate::events::Layer::Dex,
+                caller.to_string(),
+                site_ref.signature(),
+                vec![format!("call site {site_idx}, bootstrap {bootstrap_class}")],
+                Some("invoke-custom bootstrap not modelled; result left null".into()),
+            );
+            if let Some(reg) = self.next_move_result_reg() {
+                self.set_reg(reg, crate::value::Value::NULL);
+            }
+            Ok(())
+        }
+    }
 }
