@@ -1,0 +1,12 @@
+[package]
+name = "unhusk-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+unhusk-dex.workspace = true
+unhusk-apk.workspace = true
+unhusk-vm.workspace = true
+serde.workspace = true
+thiserror.workspace = true

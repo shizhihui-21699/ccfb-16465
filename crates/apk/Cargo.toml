@@ -1,0 +1,12 @@
+[package]
+name = "unhusk-apk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+unhusk-dex.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+zip.workspace = true
+sha2.workspace = true

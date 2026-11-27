@@ -1,0 +1,11 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.hello">
+  <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="30"/>
+  <application android:label="Hello" android:debuggable="true">
+    <activity android:name="com.example.hello.Main" android:exported="true">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity>
+  </application>
+</manifest>
