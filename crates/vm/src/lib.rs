@@ -16,6 +16,7 @@ pub mod framework;
 pub mod heap;
 pub mod interp;
 pub mod limits;
+pub mod native;
 pub mod value;
 
 pub use value::{ObjId, Provenance, Tag, Value};
