@@ -82,6 +82,11 @@ impl Machine {
                 return NativeOutcome::Budget { steps: self.steps };
             }
             self.last_pc = pc;
+            if std::env::var("UNHUSK_NATIVE_TRACE").is_ok() {
+                eprintln!("  [0x{pc:x}] x0={:x} x1={:x} x2={:x} x8={:x} x9={:x} x10={:x} x11={:x} flags={:?}",
+                    self.regs[0], self.regs[1], self.regs[2], self.regs[8], self.regs[9],
+                    self.regs[10], self.regs[11], self.flags);
+            }
             let Some(insn) = self.load32(pc) else {
                 return NativeOutcome::Unsupported {
                     pc,
@@ -332,15 +337,49 @@ impl Machine {
         let rt = insn & 0x1F;
         let rn = (insn >> 5) & 0x1F;
         let size = (insn >> 30) & 0x3;
-        let is_load = (insn >> 22) & 1 == 1;
-        let (offset, post_inc) = if (insn >> 24) & 0x3 == 0x1 {
+        // `is_load` for the 32/64-bit data class lives in bit 22, but for the
+        // byte/halfword class (opc 00/01 in bits 24..23) it lives in bits 23..22.
+        // Deriving both from the same bit is what made `ldrb` execute as `strb`.
+        let opc = (insn >> 22) & 0x3;
+        let is_load = match size {
+            3 => opc == 0b01,
+            2 => opc == 0b01 || opc == 0b11,
+            _ => opc & 1 == 1,
+        };
+        // Addressing form is selected by bits 25..24 plus bit 21:
+        //   01        -> unsigned immediate (imm12)
+        //   00, bit21=0 -> imm9 form (unscaled / pre- / post-indexed)
+        //   00, bit21=1 -> register offset
+        let form = (insn >> 24) & 0x3;
+        let reg_offset = (insn >> 21) & 1 == 1;
+        let (offset, post_inc) = if form == 0b01 {
             let imm12 = (insn >> 10) & 0xFFF;
-            (((imm12 as u64) << size), 0i64)
-        } else if (insn >> 24) & 0x3 == 0x0 {
-            let imm9 = sign_extend(((insn >> 12) & 0x1FF) as i64, 9);
+            ((imm12 as u64) << size, 0i64)
+        } else if form == 0b00 && reg_offset {
+            // Register offset, e.g. `ldrb w11, [x0, x8]`.
+            let rm = (insn >> 16) & 0x1F;
+            let option = (insn >> 13) & 0x7;
+            let sh = (insn >> 12) & 1;
+            let mut v = self.x(rm);
+            // Option codes, per the architecture reference:
+            //   010 UXTW, 011 LSL (== UXTX with shift), 110 SXTW, 111 SXTX
+            match option {
+                0b010 => v = v as u32 as u64,
+                0b011 => {}
+                0b110 => v = v as i32 as i64 as u64,
+                0b111 => {}
+                _ => return Err(format!("extend option {option:#05b} not emulated")),
+            }
+            if sh == 1 {
+                v <<= size;
+            }
+            (v, 0i64)
+        } else if form == 0b00 {
+            // Unscaled / pre- / post-indexed, imm9.
+            let imm9 = sign_extend(((insn >> 12) & 0x1FF) as i64, 9) as u64;
             let mode = (insn >> 10) & 0x3;
-            let post = if mode == 1 { imm9 } else { 0 };
-            (imm9 as u64, post)
+            let post = if mode == 1 { imm9 as i64 } else { 0 };
+            (imm9, post)
         } else {
             return Err(format!("load/store form 0x{insn:08x} not emulated"));
         };
@@ -609,6 +648,38 @@ fn rotate_right(v: u64, r: u32, esize: u32) -> u64 {
     }
 }
 
+/// First `SHF_EXECINSTR` section, for relocatable objects.
+fn exec_section(data: &[u8]) -> Option<Code<'_>> {
+    if data.len() < 64 {
+        return None;
+    }
+    let shoff = u64::from_le_bytes(data[40..48].try_into().ok()?) as usize;
+    let shentsize = u16::from_le_bytes(data[58..60].try_into().ok()?) as usize;
+    let shnum = u16::from_le_bytes(data[60..62].try_into().ok()?) as usize;
+    if shoff == 0 || shentsize == 0 {
+        return None;
+    }
+    for i in 0..shnum {
+        let off = shoff.checked_add(i.checked_mul(shentsize)?)?;
+        if off + 40 > data.len() {
+            return None;
+        }
+        let sh_type = u32::from_le_bytes(data[off + 4..off + 8].try_into().ok()?);
+        let sh_flags = u64::from_le_bytes(data[off + 8..off + 16].try_into().ok()?);
+        let sh_offset = u64::from_le_bytes(data[off + 24..off + 32].try_into().ok()?) as usize;
+        let sh_size = u64::from_le_bytes(data[off + 32..off + 40].try_into().ok()?) as usize;
+        // SHT_PROGBITS with SHF_EXECINSTR (0x4).
+        if sh_type == 1 && sh_flags & 0x4 != 0 && sh_size > 0 {
+            let end = sh_offset.checked_add(sh_size)?;
+            if end <= data.len() {
+                // Relocatable sections load at virtual address 0.
+                return Some(Code { bytes: &data[sh_offset..end], vaddr: 0 });
+            }
+        }
+    }
+    None
+}
+
 /// An executable ELF segment of an AArch64 `.so`.
 pub struct Code<'a> {
     pub bytes: &'a [u8],
@@ -621,7 +692,9 @@ impl<'a> Code<'a> {
         if data.len() < 64 || &data[0..4] != b"\x7fELF" || data[4] != 2 {
             return None;
         }
-        if data[18] != 0xB7 && data[18] != 0 {
+        // e_machine is a 16-bit field at offset 18 (little-endian).
+        let e_machine = u16::from_le_bytes([data[18], data[19]]);
+        if e_machine != 0xB7 {
             return None; // not EM_AARCH64
         }
         let phoff = u64::from_le_bytes(data[32..40].try_into().ok()?) as usize;
@@ -630,7 +703,7 @@ impl<'a> Code<'a> {
         for i in 0..phnum {
             let off = phoff.checked_add(i.checked_mul(phentsize)?)?;
             if off + 56 > data.len() {
-                return None;
+                break;
             }
             let p_type = u32::from_le_bytes(data[off..off + 4].try_into().ok()?);
             let p_flags = u32::from_le_bytes(data[off + 4..off + 8].try_into().ok()?);
@@ -645,7 +718,11 @@ impl<'a> Code<'a> {
                 }
             }
         }
-        None
+        // Relocatable object (e.g. a `.o` from a unit test): fall back to the
+        // section header table and take the first executable section. This is
+        // what lets us test the interpreter against a compiler's real output
+        // without linking a shared object first.
+        exec_section(data)
     }
 
     pub fn first_word(&self) -> Option<u32> {
