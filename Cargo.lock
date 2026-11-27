@@ -601,6 +601,7 @@ name = "unhusk-engine"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
  "thiserror",
  "unhusk-apk",
  "unhusk-dex",

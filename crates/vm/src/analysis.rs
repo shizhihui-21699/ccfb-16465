@@ -214,40 +214,115 @@ pub fn compare_profiles(apk: &Apk, cfg: &AnalysisConfig) -> (Analysis, Option<Pr
 }
 
 impl Machine {
-    /// Configure and run the entry points of `desc` class, in a defined order:
-    /// static initialiser, then Application/Activity lifecycle stubs, then any
-    /// `main`/`run`/`start`.
+    /// Seed execution at the manifest entry points.
+    ///
+    /// Android calls into an app through a handful of well-known lifecycle
+    /// methods, and almost none of them are static — an Activity's `onCreate`
+    /// takes a receiver. So seeding has to *instantiate* the component and then
+    /// invoke the lifecycle method with plausible arguments, or a real app's
+    /// entry point runs zero instructions.
+    ///
+    /// Order matters and mirrors the platform: class initialiser first (it sets
+    /// up static state), then the constructor, then the lifecycle callbacks.
     pub fn seed_entry(&mut self, class_desc: &str) {
         if !self.program.class_exists(class_desc) {
             return;
         }
-        let mut order = ["<clinit>", "attachBaseContext", "onCreate", "main", "run", "start", "init"];
-        for name in order.iter_mut() {
-            let handles: Vec<_> = self.program.methods_named(class_desc, name).to_vec();
-            for h in handles {
-                let (has_code, is_static, nargs, display) = {
-                    let m = self.program.method(h);
-                    (m.code.is_some(), m.is_static, m.proto.params.len(), m.display())
-                };
-                if !has_code || !is_static || !self.frames.is_empty() {
-                    continue;
-                }
-                // Never re-run something the sample already reached.
-                if self.entered.contains(&h) {
-                    continue;
-                }
-                if self.budget.is_stopped() {
-                    return;
-                }
-                // Parameters get null/zero defaults.
-                let args = vec![Value::NULL; nargs];
-                let already = self.entered.contains(&h);
-                let _ = self.push_frame(h, args, None, None);
-                if !already {
+        // 1. Static initialiser, independent of any instance.
+        self.run_static(class_desc, "<clinit>");
+
+        // 2. An instance, so non-static lifecycle methods have a receiver. The
+        //    constructor itself often does real work (registering receivers,
+        //    starting services), so it is worth running.
+        let instance = match self.heap.alloc(crate::heap::Object::Instance {
+            class: class_desc.to_string(),
+            fields: Default::default(),
+            prov: crate::value::Provenance::default(),
+        }) {
+            Some(id) => Some(id),
+            None => None,
+        };
+        if let Some(id) = instance {
+            if let Some(ctor) = self
+                .program
+                .methods_named(class_desc, "<init>")
+                .iter()
+                .copied()
+                .find(|h| self.program.method(*h).code.is_some())
+            {
+                if !self.entered.contains(&ctor) && !self.budget.is_stopped() {
+                    let display = self.program.method(ctor).display();
+                    let mut args = vec![Value::obj(id)];
+                    let need = self.program.method(ctor).proto.params.len();
+                    args.extend(std::iter::repeat(Value::NULL).take(need));
                     self.executed.push(display);
+                    let _ = self.push_frame(ctor, args, None, None);
+                    let _ = self.run();
                 }
-                let _ = self.run();
             }
+
+            // 3. Lifecycle callbacks, in the order the platform would deliver a
+            //    normal launch. A sample that gates on "am I really started"
+            //    only trips after onCreate, so this matters.
+            for name in [
+                "attachBaseContext",
+                "onAttach",
+                "onCreate",
+                "onStart",
+                "onResume",
+                "onNewIntent",
+                "onBind",
+                "onReceive",
+                "onStartCommand",
+                "onHandleIntent",
+                "onRestoreInstanceState",
+            ] {
+                let handles = self.program.methods_named(class_desc, name).to_vec();
+                for h in handles {
+                    let (has_code, is_static, nargs, display) = {
+                        let m = self.program.method(h);
+                        (m.code.is_some(), m.is_static, m.proto.params.len(), m.display())
+                    };
+                    if !has_code || is_static || self.entered.contains(&h) {
+                        continue;
+                    }
+                    if self.budget.is_stopped() || !self.frames.is_empty() {
+                        return;
+                    }
+                    let mut args = vec![Value::obj(id)];
+                    args.extend(std::iter::repeat(Value::NULL).take(nargs));
+                    self.executed.push(display);
+                    let _ = self.push_frame(h, args, None, None);
+                    let _ = self.run();
+                    // The instance may have been replaced by a model object
+                    // during the call; it is still a valid handle.
+                }
+            }
+        }
+
+        // 4. Static entry points, for non-Android-shaped payloads.
+        for name in ["main", "run", "start", "init", "execute", "doWork"] {
+            self.run_static(class_desc, name);
+        }
+    }
+
+    fn run_static(&mut self, class_desc: &str, name: &str) {
+        let handles = self.program.methods_named(class_desc, name).to_vec();
+        for h in handles {
+            let (has_code, is_static, nargs, display) = {
+                let m = self.program.method(h);
+                (m.code.is_some(), m.is_static, m.proto.params.len(), m.display())
+            };
+            if !has_code || !is_static || self.entered.contains(&h) {
+                continue;
+            }
+            if self.budget.is_stopped() || !self.frames.is_empty() {
+                return;
+            }
+            let args = vec![Value::NULL; nargs];
+            self.executed.push(display);
+            let _ = self.push_frame(h, args, None, None);
+            let _ = self.run();
         }
     }
 }

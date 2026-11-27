@@ -459,8 +459,9 @@ pub fn decode(insns: &[u16]) -> Vec<Insn> {
                     if pc + 1 >= insns.len() {
                         break;
                     }
+                    // ident(1) + size(1) + first_key(2) + targets(size)
                     let size = insns[pc + 1] as usize;
-                    let width = (size * 2 + 4) as u32;
+                    let width = (size + 4) as u32;
                     out.push(Insn {
                         pc: pc as u32,
                         width,
@@ -483,8 +484,9 @@ pub fn decode(insns: &[u16]) -> Vec<Insn> {
                     if pc + 1 >= insns.len() {
                         break;
                     }
+                    // ident(1) + size(1) + keys(size) + targets(size)
                     let size = insns[pc + 1] as usize;
-                    let width = (size * 4 + 2) as u32;
+                    let width = (size * 2 + 2) as u32;
                     out.push(Insn {
                         pc: pc as u32,
                         width,
@@ -786,8 +788,8 @@ mod tests {
 
     #[test]
     fn decodes_const_and_return() {
-        // const/4 v0, #1 ; return v0
-        let insns = [0x0112u16, 0x000f];
+        // const/4 v0, #1 ; return v0  (encodings as d8 emits them)
+        let insns = [0x1012u16, 0x000f];
         let d = decode(&insns);
         assert_eq!(d.len(), 2);
         assert_eq!(d[0].mnemonic(), "const/4");
@@ -800,7 +802,8 @@ mod tests {
     #[test]
     fn decodes_invoke_with_regs() {
         // invoke-static {v0, v1}, method@0x10
-        let insns = [0x2071u16, 0x0010, 0x0001];
+        // unit2 packs C=v0 in the low nibble and D=v1 in the next one.
+        let insns = [0x2071u16, 0x0010, 0x0010];
         let d = decode(&insns);
         assert_eq!(d[0].mnemonic(), "invoke-static");
         assert_eq!(d[0].a, 2);
@@ -821,7 +824,7 @@ mod tests {
 
     #[test]
     fn branch_target_is_absolute() {
-        // goto +3  (0x28, offset 3)
+        // goto +3 : opcode 0x28 with the 8-bit offset in the high byte.
         let insns = [0x0328u16];
         let d = decode(&insns);
         assert_eq!(d[0].target, Some(3));
@@ -830,7 +833,7 @@ mod tests {
 
     #[test]
     fn sign_extends_negative_literals() {
-        // const/4 v0, #-1
+        // const/4 v0, #-1  (literal nibble 0xf)
         let insns = [0xf012u16];
         let d = decode(&insns);
         assert_eq!(d[0].literal, -1);
