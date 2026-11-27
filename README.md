@@ -132,6 +132,18 @@ do, and says so in the report:
 * **Obfuscated control flow is followed, not solved.** Opaque predicates and
   flattening are executed as written. The sample is handed plausible state, and
   if that state reaches the payload, so does the run.
+* **The model tolerates its own gaps.** When an unmodelled framework call
+  returns a default and the sample then dereferences it or casts it, the
+  interpreter does *not* abort: it records the divergence and continues, and
+  the report counts them in the caveats. This is a deliberate trade — an
+  abort here loses every finding after that point, and on real applications it
+  happens within the first few hundred instructions of startup. The cost is
+  that a branch after such a point may differ from a real device, which is
+  exactly what the caveat tells the reader.
+* **Call sites are supported but not universal.** `invoke-custom` dispatch
+  understands `LambdaMetafactory` (lambdas, method references) and
+  `StringConcatFactory` (runtime string concatenation). Any other bootstrap is
+  recorded and skipped rather than guessed at.
 * **The framework model is a subset.** Calls the model does not know return a
   default. The trace records which calls were modelled and which were not, so a
   reader can tell where the picture stops.
@@ -142,7 +154,7 @@ do, and says so in the report:
 
 ```bash
 cargo build --release
-cargo test                      # 40+ tests, no Android toolchain needed
+cargo test                      # 51 tests, no Android toolchain needed
 ```
 
 The test corpus (`fixtures/*.apk`) is committed, so tests do not require
