@@ -214,13 +214,22 @@ fn callgraph(o: &mut String, r: &Report) {
             .trim_start_matches('L')
             .trim_end_matches(';')
             .replace('/', ".");
-        let entry = r
+        // An entry class is usually entered several times (constructor,
+        // lifecycle callback, static main). Each of those is a real root, so
+        // render all of them; picking only the first made a plain app's
+        // `main` invisible in the tree.
+        let entries: Vec<String> = r
             .graph
             .order
             .iter()
-            .find(|m| m.starts_with(&dotted))
-            .cloned();
-        if let Some(entry) = entry {
+            .filter(|m| m.starts_with(&dotted))
+            .filter(|m| {
+                let c = r.graph.callers(m);
+                c.is_empty() || c == ["<entry>"]
+            })
+            .cloned()
+            .collect();
+        for entry in entries {
             printed += render_subtree(o, r, &entry, 0, &mut shown, &mut budget, 3);
         }
         if budget == 0 {
@@ -256,7 +265,11 @@ fn render_subtree(
         return 0;
     }
     let indent = "  ".repeat(depth);
-    let marker = if is_runtime(method) { " [runtime]" } else { "" };
+    let marker = if r.runtime_methods.contains(method) {
+        " [runtime]"
+    } else {
+        ""
+    };
     if shown.contains(method) {
         o.push_str(&format!("{indent}{method}{marker} (see above)\n"));
         *budget = budget.saturating_sub(1);
@@ -273,13 +286,6 @@ fn render_subtree(
         }
     }
     n
-}
-
-fn is_runtime(method: &str) -> bool {
-    // The recovered payload's classes are reported with their descriptor; the
-    // graph uses dotted display names. Match the common payload convention and
-    // let the engine pass exact names in `facts` when available.
-    method.contains("payload")
 }
 
 fn facts(o: &mut String, r: &Report) {

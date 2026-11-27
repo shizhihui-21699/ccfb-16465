@@ -58,6 +58,10 @@ pub struct ReportInput<'a> {
 /// A fully built report, ready to render.
 pub struct Report {
     pub facts: StaticFacts,
+    /// Methods whose body came from a payload recovered during this run.
+    /// Populated from the trace's `RecoveredDex` layer, so the renderer never
+    /// has to guess from a class name.
+    pub runtime_methods: std::collections::BTreeSet<String>,
     pub findings: Vec<Finding>,
     pub graph: CallGraph,
     pub recovered: Vec<RecoveredSummary>,
@@ -212,8 +216,15 @@ impl<'a> ReportInput<'a> {
         if self.recovered.is_empty() && !self.classes_in_recovered.is_empty() {
             caveats.push("no runtime payload was recovered".to_string());
         }
+        let runtime_methods: std::collections::BTreeSet<String> = self
+            .events
+            .iter()
+            .filter(|e| e.kind == EventKind::MethodEnter && e.layer == Layer::RecoveredDex)
+            .map(|e| e.subject.clone())
+            .collect();
         Report {
             facts: self.facts,
+            runtime_methods,
             findings,
             graph,
             recovered,
